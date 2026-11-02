@@ -283,10 +283,35 @@ export default function App() {
                         <div className="top-row">
                             <section className="card-box generate-card">
                                 <h3>Generate Flashcards</h3>
-                                <form onSubmit={(e) => {
+                                <form onSubmit={async (e) => {
                                     e.preventDefault();
-                                    setStatusMsg("Gemini API in progress; functionality isn't hooked up YET, " +
-                                        "so no flashcards are being generated as of right now.");
+                                    setStatusMsg("Sending notes to Express backend...");
+                                    try {
+                                        const response = await fetch("http://localhost:3000/gemini/generate-flashcards", {
+                                            method: "POST",
+                                            headers: { "Content-Type": "application/json" },
+                                            body: JSON.stringify({ notes: notesInput })
+                                        });
+                                        const data = await response.json();
+
+                                        if (!response.ok) {
+                                            // This catches the backend 400 Bad Request error!
+                                            setStatusMsg(`Error: ${data.error}`);
+                                        } else {
+                                            // Adds the newly generated deck from Express right into your Decks list and selects it!
+                                            const newDeckName = `Generated: ${notesInput.trim().substring(0, 15)}`;
+                                            setDecks((prev) => ({
+                                                ...prev,
+                                                [newDeckName]: { mastery_score: 0, cards: data.cards }
+                                            }));
+                                            setActiveDeckTitle(newDeckName);
+                                            setCurrentIndex(0);
+                                            setIsFlipped(false);
+                                            setStatusMsg(`Success! ${data.message} Added deck "${newDeckName}"!`);
+                                        }
+                                    } catch (err) {
+                                        setStatusMsg("Network error: Could not reach Express backend.");
+                                    }
                                 }}>
                                     <textarea
                                         value={notesInput}
@@ -366,7 +391,7 @@ export default function App() {
                             <section className="card-box decks-card">
                                 <h3>Decks</h3>
                                 <div className="decks-list">
-                                    {Object.keys(INITIAL_DECKS).map((title) => (
+                                    {Object.keys(decks).map((title) => (
                                         <div
                                             key={title}
                                             className={`deck-item ${activeDeckTitle === title ? "active-deck" : ""}`}
