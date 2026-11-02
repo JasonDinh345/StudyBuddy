@@ -65,3 +65,7 @@ or click the red X button (or press 2) to decrement the score (down to -5),
 automatically cycling through the cards (1/3 -> 2/3 -> 3/3).
 * Refresh the browser page (Cmd + R or Ctrl + R). All deck mastery scores, active tab selection, 
 sidebar open/closed state, and Pomodoro timer countdown states persist via localStorage.
+
+#### Additional Notes 
+No .env or MySQL is needed to run Phase II; .env.example and schema.sql are for Phase III.
+(.env.example included as per assignment 'include' instructions).
