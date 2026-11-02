@@ -10,7 +10,7 @@ const geminiRouter = Router();
 
 // POST /gemini/generate-flashcards w/ HTTP 400 validation
 geminiRouter.post("/generate-flashcards", (req, res) => {
-    const {notes} = req.body;
+    const {notes} = req.body ?? {};
 
     // validation: return HTTP 400 bad request if notes input is empty or invalid
     if (!notes || typeof notes !== "string" || notes.trim() === "") {
