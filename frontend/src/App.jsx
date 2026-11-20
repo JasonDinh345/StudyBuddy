@@ -339,6 +339,9 @@ export default function App() {
                             <section className="card-box timer-card">
                                 <h3>Timer</h3>
                                 <div className="timer-display">{formattedTime}</div>
+                                <div className="timer-warning-slot">
+                                    {timerWarning && <span key={timerWarning} className="timer-warning">{timerWarning}</span>}
+                                </div>
                                 <div className="timer-controls">
                                     <button onClick={toggleTimer} className="icon-btn">
                                         {timerState.isRunning ? "❚❚" : "▶"}
@@ -443,6 +446,9 @@ export default function App() {
                     <div className="fullscreen-timer">
                         <h2>Focus Timer</h2>
                         <div className="big-timer-display">{formattedTime}</div>
+                        <div className="timer-warning-slot">
+                                    {timerWarning && <span key={timerWarning} className="timer-warning">{timerWarning}</span>}
+                                </div>
                         <div className="timer-controls big-controls">
                             <button onClick={toggleTimer} className="primary-btn">
                                 {timerState.isRunning ? "Pause" : "Start"}
