@@ -1,11 +1,23 @@
-import { Router } from "express";
 import dotenv from "dotenv";
 
 import pool from "../lib/db.js";
-dotenv.config();
-const decksRouter = Router();
+dotenv.config({ path: "../.env" });
+import express from "express";
+const app = express();
+const PORT = process.env.PORT || 3002;
+const SERVICE_API_KEY = process.env.SERVICE_API_KEY || "tcss460-secret";
 
-decksRouter.post("/add", async (req, res) => {
+app.use(express.json());
+
+function requireApiKey(req, res, next) {
+    if (req.header("x-api-key") !== SERVICE_API_KEY) {
+        return res
+            .status(401)
+            .json({ error: "Missing or invalid x-api-key header." });
+    }
+    next();
+}
+app.post("/add", requireApiKey, async (req, res) => {
     const { deck, title } = req.body;
     if (!deck || !Array.isArray(deck) || deck.length === 0) {
         return res.status(400).json({ message: "Invalid Request" });
@@ -41,7 +53,7 @@ decksRouter.post("/add", async (req, res) => {
     }
 });
 
-decksRouter.get("/", async (req, res) => {
+app.get("/", requireApiKey, async (req, res) => {
     const { deckID } = req.query;
 
     try {
@@ -59,7 +71,7 @@ decksRouter.get("/", async (req, res) => {
         });
     }
 });
-decksRouter.delete("/:id", async (req, res) => {
+app.delete("/:id", async (req, res) => {
     const { id } = req.params;
     if (!id) {
         return res.status(400).json({ error: "Invalid Request!" });
@@ -79,4 +91,6 @@ decksRouter.delete("/:id", async (req, res) => {
         });
     }
 });
-export default decksRouter;
+app.listen(PORT, () => {
+    console.log(`Decks Service running at http://localhost:${PORT}`);
+});
