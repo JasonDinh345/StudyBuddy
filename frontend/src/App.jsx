@@ -230,6 +230,18 @@ export default function App() {
     const minutes = Math.floor(timerState.timeLeft / 60);
     const seconds = timerState.timeLeft % 60;
     const formattedTime = `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+    const show_seconds = 30;
+
+    let timerWarning = "";
+     if(timerState.isRunning && timerState.mode === "study"){
+           if(timerState.timeLeft <= 900 && timerState.timeLeft > 900 - show_seconds){
+            timerWarning = "15 MINUTES REMAINING!";
+           }else if(timerState.timeLeft <= 600 && timerState.timeLeft > 600 - show_seconds){
+            timerWarning = "10 MINUTES REMAINING!";
+           }else if (timerState.timeLeft <= 300 && timerState.timeLeft > 300 - show_seconds){
+            timerWarning = "5 MINUTES REMAINING!";
+           }
+    }
 
     function toggleTimer() {
         setTimerState((prev) => ({ ...prev, isRunning: !prev.isRunning }));
