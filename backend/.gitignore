@@ -3,7 +3,6 @@ node_modules/
 # Environment variables
 .env
 .env.*
-!.env.example
 
 # Logs and generated files
 *.log
@@ -14,5 +13,3 @@ dist/
 # OS files
 .DS_Store
 Thumbs.db
-
-.rest
