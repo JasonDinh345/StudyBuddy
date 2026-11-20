@@ -434,3 +434,39 @@ body {
 .big-controls {
   gap: 16px;
 }
+.timer-warning-slot {
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 8px;
+}
+
+.timer-warning-slot.big {
+  height: 40px;
+  margin-top: -24px;
+
+}
+
+.timer-warning {
+  color: #dc2626;
+  font-weight: 700;
+  font-size: 0.95rem;
+  animation:  
+            warningBlink 1s ease-in-out 10,
+            warningFade 1s ease forwards 15s;
+}
+
+.timer-warning-slot.big .timer-warning {
+  font-size: 1.5rem;
+}
+
+@keyframes warningBlink {
+  0%, 100% {opacity: 1;}
+  50% {opacity: 0;}
+}
+
+@keyframes warningFade {
+  from {opacity: 1;}
+  to {opacity: 0;}
+}

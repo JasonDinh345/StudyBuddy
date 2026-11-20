@@ -230,6 +230,19 @@ export default function App() {
     const minutes = Math.floor(timerState.timeLeft / 60);
     const seconds = timerState.timeLeft % 60;
     const formattedTime = `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+    const show_seconds = 30;
+
+    let timerWarning = "";
+     if(timerState.isRunning && timerState.mode === "study"){
+           if(timerState.timeLeft <= 900 && timerState.timeLeft > 900 - show_seconds){
+            timerWarning = "15 MINUTES REMAINING!";
+           }else if(timerState.timeLeft <= 600 && timerState.timeLeft > 600 - show_seconds){
+            timerWarning = "10 MINUTES REMAINING!";
+           }else if (timerState.timeLeft <= 300 && timerState.timeLeft > 300 - show_seconds){
+            timerWarning = "5 MINUTES REMAINING!";
+           }
+    }
+
 
     function toggleTimer() {
         setTimerState((prev) => ({ ...prev, isRunning: !prev.isRunning }));
@@ -327,6 +340,9 @@ export default function App() {
                             <section className="card-box timer-card">
                                 <h3>Timer</h3>
                                 <div className="timer-display">{formattedTime}</div>
+                                <div className="timer-warning-slot">
+                                    {timerWarning && <span key={timerWarning} className="timer-warning">{timerWarning}</span>}
+                                </div>
                                 <div className="timer-controls">
                                     <button onClick={toggleTimer} className="icon-btn">
                                         {timerState.isRunning ? "❚❚" : "▶"}
@@ -431,6 +447,9 @@ export default function App() {
                     <div className="fullscreen-timer">
                         <h2>Focus Timer</h2>
                         <div className="big-timer-display">{formattedTime}</div>
+                        <div className="timer-warning-slot">
+                            {timerWarning && <span key={timerWarning} className="timer-warning">{timerWarning}</span>}
+                        </div>
                         <div className="timer-controls big-controls">
                             <button onClick={toggleTimer} className="primary-btn">
                                 {timerState.isRunning ? "Pause" : "Start"}
