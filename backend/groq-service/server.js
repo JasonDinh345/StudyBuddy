@@ -1,11 +1,25 @@
-import { Router } from "express";
 import dotenv from "dotenv";
 
 import pool from "../lib/db.js";
-dotenv.config();
-const groqRouter = Router();
+dotenv.config({ path: "../.env" });
+import express from "express";
 
-groqRouter.post("/generate-flashcards", async (req, res) => {
+const app = express();
+const PORT = process.env.PORT || 3001;
+const SERVICE_API_KEY = process.env.SERVICE_API_KEY || "tcss460-secret";
+
+app.use(express.json());
+
+function requireApiKey(req, res, next) {
+    if (req.header("x-api-key") !== SERVICE_API_KEY) {
+        return res
+            .status(401)
+            .json({ error: "Missing or invalid x-api-key header." });
+    }
+
+    next();
+}
+app.post("/generate-flashcards", requireApiKey, async (req, res) => {
     const { notes } = req.body;
 
     // Validate input
@@ -102,12 +116,10 @@ groqRouter.post("/generate-flashcards", async (req, res) => {
     }
 });
 
-groqRouter.post("/low-mastery/:deckID", async (req, res) => {
+app.post("/low-mastery/:deckID", requireApiKey, async (req, res) => {
     const { deckID } = req.params;
 
-    if (!userID) {
-        return res.status(401).json({ message: "Unauthorized Request" });
-    } else if (!deckID) {
+    if (!deckID) {
         return res.status(401).json({ message: "Invalid Request" });
     }
     try {
@@ -198,4 +210,6 @@ groqRouter.post("/low-mastery/:deckID", async (req, res) => {
     }
 });
 
-export default groqRouter;
+app.listen(PORT, () => {
+    console.log(`Groq Service running at http://localhost:${PORT}`);
+});
