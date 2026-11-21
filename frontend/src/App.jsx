@@ -102,6 +102,7 @@ export default function App() {
     const [isFlipped, setIsFlipped] = useState(false);
     const [notesInput, setNotesInput] = useState("");
     const [statusMsg, setStatusMsg] = useState("");
+    const [isGenerating, setIsGenerating] = useState(false);
     const [animatingBtn, setAnimatingBtn] = useState(null);
 
     const [timerState, setTimerState] = useState(() => {
@@ -251,7 +252,91 @@ export default function App() {
     function resetTimer(minutesVal = 25) {
         setTimerState({ timeLeft: minutesVal * 60, isRunning: false, mode: minutesVal === 25 ? "study" : "rest" });
     }
+    function extractGeneratedCards(data) {
+        let cardList = [];
 
+        if (Array.isArray(data)) {
+            cardList = data;
+        } else if (data && Array.isArray(data.cards)) {
+            cardList = data.cards;
+        } else if (data && Array.isArray(data.flashcards)) {
+            cardList = data.flashcards;
+        } else if (data && typeof data === "object") {
+            if (typeof data.question === "string" && typeof data.answer === "string") {
+                cardList = [data];
+            } else {
+                const values = Object.values(data);
+                for (let i = 0; i < values.length; i++) {
+                    if (Array.isArray(values[i])) {
+                        cardList = values[i];
+                        break;
+                    }
+                }
+            }
+        }
+
+        return cardList.filter(function (card) {
+            return (
+                card &&
+                typeof card.question === "string" &&
+                typeof card.answer === "string"
+            );
+        });
+    }
+
+    async function handleGenerateFlashcards(e) {
+        e.preventDefault();
+        setIsGenerating(true);
+        setStatusMsg("Sending notes to API Gateway...");
+
+        try {
+            const response = await fetch("http://localhost:3000/api/groq/generate-flashcards", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ notes: notesInput })
+            });
+
+            let data = {};
+            try {
+                data = await response.json();
+            } catch (parseErr) {
+                console.error("Failed to parse JSON:", parseErr);
+            }
+
+            if (!response.ok) {
+                let errMsg = `Request failed (HTTP ${response.status})`;
+                if (data && data.error) {
+                    errMsg = data.error;
+                } else if (data && data.message) {
+                    errMsg = data.message;
+                }
+                setStatusMsg(`Error: ${errMsg}`);
+                return;
+            }
+
+            const generatedCards = extractGeneratedCards(data);
+            if (generatedCards.length === 0) {
+                setStatusMsg("Error: Groq returned no valid flashcards. Try adding more detail to your notes.");
+                return;
+            }
+
+            const newDeckName = `Generated: ${notesInput.trim().substring(0, 15)}`;
+            setDecks((prev) => ({
+                ...prev,
+                [newDeckName]: { mastery_score: 0, cards: generatedCards }
+            }));
+            setActiveDeckTitle(newDeckName);
+            setCurrentIndex(0);
+            setIsFlipped(false);
+            setNotesInput("");
+            setStatusMsg(`Success! Generated ${generatedCards.length} flashcards in "${newDeckName}".`);
+        } catch (err) {
+            console.error(err);
+            setStatusMsg("Network error: Could not reach API Gateway on port 3000.");
+        } finally {
+            setIsGenerating(false);
+        }
+    }
     return (
         <div className="app-layout">
             <button
@@ -296,43 +381,18 @@ export default function App() {
                         <div className="top-row">
                             <section className="card-box generate-card">
                                 <h3>Generate Flashcards</h3>
-                                <form onSubmit={async (e) => {
-                                    e.preventDefault();
-                                    setStatusMsg("Sending notes to Express backend...");
-                                    try {
-                                        const response = await fetch("http://localhost:3000/gemini/generate-flashcards", {
-                                            method: "POST",
-                                            headers: { "Content-Type": "application/json" },
-                                            body: JSON.stringify({ notes: notesInput })
-                                        });
-                                        const data = await response.json();
-
-                                        if (!response.ok) {
-                                            // This catches the backend 400 Bad Request error!
-                                            setStatusMsg(`Error: ${data.error}`);
-                                        } else {
-                                            // Adds the newly generated deck from Express right into your Decks list and selects it!
-                                            const newDeckName = `Generated: ${notesInput.trim().substring(0, 15)}`;
-                                            setDecks((prev) => ({
-                                                ...prev,
-                                                [newDeckName]: { mastery_score: 0, cards: data.cards }
-                                            }));
-                                            setActiveDeckTitle(newDeckName);
-                                            setCurrentIndex(0);
-                                            setIsFlipped(false);
-                                            setStatusMsg(`Success! ${data.message} Added deck "${newDeckName}"!`);
-                                        }
-                                    } catch (err) {
-                                        setStatusMsg("Network error: Could not reach Express backend.");
-                                    }
-                                }}>
+                                <form onSubmit={handleGenerateFlashcards}>
                                     <textarea
                                         value={notesInput}
                                         onChange={(e) => setNotesInput(e.target.value)}
                                         placeholder="Enter a topic or paste notes below. We'll create flashcards for you!"
                                         rows={3}
+                                        disabled={isGenerating}
                                     />
-                                    <button type="submit" className="primary-btn">Generate</button>
+                                    <button type="submit" className="primary-btn" disabled={isGenerating}>
+                                        {isGenerating && "Generating..."}
+                                        {!isGenerating && "Generate"}
+                                    </button>
                                 </form>
                                 {statusMsg && <p className="status-note">{statusMsg}</p>}
                             </section>
