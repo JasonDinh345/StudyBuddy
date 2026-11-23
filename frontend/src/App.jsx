@@ -1,81 +1,35 @@
-import { useState, useEffect } from 'react';
-import './App.css';
-import logoImg from './assets/logo.png';
+import { useState, useEffect } from "react";
+import "./App.css";
+import { INITIAL_DECKS } from "./data/initialDecks";
+import { generateFlashcardsFromNotes } from "./services/api";
+import Sidebar from "./components/Sidebar";
+import GenerateForm from "./components/GenerateForm";
+import PomodoroTimer from "./components/PomodoroTimer";
+import FlashcardViewer from "./components/FlashcardViewer";
+import DeckList from "./components/DeckList";
 
-const INITIAL_DECKS = {
-    "Java Collections": {
-        mastery_score: 0,
-        cards: [
-            {
-                question: "What does a constructor do in Java?",
-                answer: "Initializes object & assigns values to its fields."
-            },
-            {
-                question: "What is the diff. between ArrayList & LinkedList?",
-                answer: "ArrayList dynamic (fast random access), LinkedList doubly-linked nodes (fast insertions/deletions)."
-            },
-            {
-                question: "What does HashMap class do?",
-                answer: "Store key/value pairs w/ O(1) avg. time complexity for get & put."
-            }
-        ]
-    },
-    "Python Syntax": {
-        mastery_score: 0,
-        cards: [
-            {
-                question: "What is a lambda fnx. in Python?",
-                answer: "Anonymous small fnx. defined using 'lambda' keyword"
-            },
-            {
-                question: "How do list comprehensions work?",
-                answer: "Provide concise way to create lists [expression for item in iterable if condition]."
-            },
-            {
-                question: "What is difference between is and == in Python?",
-                answer: "'is' checks memory address equality; '==' checks value equality."
-            }
-        ]
-    },
-    "Client/Server Programming": {
-        mastery_score: 0,
-        cards: [
-            {
-                question: "What is the primary communication pattern used in client/server web apps?",
-                answer: "Stateless request/response pattern over HTTP; client initiates a request & server processes it to send back a response."
-            },
-            {
-                question: "Which 2 pieces of info in an HTTP request tell the server what action to perform & where?",
-                answer: "HTTP method (GET, POST) defines requested operation; while resource URI identifies target resource on server."
-            },
-            {
-                question: "How are responsibilities separated in a standard 3 tier web app. architecture?",
-                answer: "Responsibilities split into top tier (UI/browser for input & display), middle tier (web server handling business logic), and a bottom tier (DB maintaining persistent data)."
-            }
-        ]
-    },
-    "OS Basics": {
-        mastery_score: 0,
-        cards: [
-            {
-                question: "What is a proc. in an OS?",
-                answer: "Program in execution, having its own mem space & sys resources"
-            },
-            {
-                question: "What is a deadlock?",
-                answer: "Situation where 2+ competing actions are waiting for the other to finish, causing infinite wait."
-            },
-            {
-                question: "What is VM?",
-                answer: "Mem. management capability that uses hardware & software to map memory addresses."
-            }
-        ]
+const DECKS_STORAGE_KEY = "studybuddy_card_mastery_v9";
+
+function normalizeDecks(rawDecks) {
+    const normalized = {};
+    for (const [title, deck] of Object.entries(rawDecks || {})) {
+        const cards = Array.isArray(deck?.cards) ? deck.cards : [];
+        normalized[title] = {
+            cards: cards.map((card, idx) => ({
+                id: card.id ?? card.card_id ?? `${title}-${idx}`,
+                question: card.question,
+                answer: card.answer,
+                mastery_score:
+                    typeof card.mastery_score === "number" ? card.mastery_score : 0,
+            })),
+        };
     }
-};
+    return normalized;
+}
 
 export default function App() {
-    const [activeTab, setActiveTab] = useState(() =>
-        localStorage.getItem("studybuddy_tab") || "dashboard"
+    const [activeTab, setActiveTab] = useState(
+        () => localStorage.getItem("studybuddy_tab") || "dashboard"
     );
 
     const [isSidebarOpen, setIsSidebarOpen] = useState(() => {
@@ -85,17 +39,23 @@ export default function App() {
 
     const [decks, setDecks] = useState(() => {
         try {
-            const savedDecks = localStorage.getItem("studybuddy_deck_mastery_v8");
-            if (savedDecks) return JSON.parse(savedDecks);
+            const savedV9 = localStorage.getItem(DECKS_STORAGE_KEY);
+            if (savedV9) return normalizeDecks(JSON.parse(savedV9));
+
+            // Migrate any existing v8 decks smoothly so generated decks aren't lost
+            const savedV8 = localStorage.getItem("studybuddy_deck_mastery_v8");
+            if (savedV8) return normalizeDecks(JSON.parse(savedV8));
         } catch (e) {
             console.error(e);
         }
         return INITIAL_DECKS;
     });
 
-    const [activeDeckTitle, setActiveDeckTitle] = useState(() =>
-        localStorage.getItem("studybuddy_active_title") || "Java Collections"
-    );
+    const [activeDeckTitle, setActiveDeckTitle] = useState(() => {
+        const saved = localStorage.getItem("studybuddy_active_title");
+        return saved || "Java Collections";
+    });
+
     const [currentIndex, setCurrentIndex] = useState(() =>
         Number(localStorage.getItem("studybuddy_card_index") || 0)
     );
@@ -112,13 +72,10 @@ export default function App() {
         } catch (e) {
             console.error(e);
         }
-        return {
-            timeLeft: 25 * 60,
-            isRunning: false,
-            mode: "study"
-        };
+        return { timeLeft: 25 * 60, isRunning: false, mode: "study" };
     });
 
+    // Persist states to localStorage
     useEffect(() => {
         localStorage.setItem("studybuddy_tab", activeTab);
     }, [activeTab]);
@@ -132,17 +89,18 @@ export default function App() {
     }, [activeDeckTitle]);
 
     useEffect(() => {
-        localStorage.setItem("studybuddy_card_index", currentIndex);
+        localStorage.setItem("studybuddy_card_index", String(currentIndex));
     }, [currentIndex]);
 
     useEffect(() => {
-        localStorage.setItem("studybuddy_deck_mastery_v8", JSON.stringify(decks));
+        localStorage.setItem(DECKS_STORAGE_KEY, JSON.stringify(decks));
     }, [decks]);
 
     useEffect(() => {
         localStorage.setItem("studybuddy_timer_v8", JSON.stringify(timerState));
     }, [timerState]);
 
+    // Pomodoro interval
     useEffect(() => {
         let interval = null;
         if (timerState.isRunning) {
@@ -150,50 +108,69 @@ export default function App() {
                 setTimerState((prev) => {
                     if (prev.timeLeft > 0) {
                         return { ...prev, timeLeft: prev.timeLeft - 1 };
-                    } else {
-                        clearInterval(interval);
-                        return { ...prev, isRunning: false };
                     }
+                    clearInterval(interval);
+                    return { ...prev, isRunning: false };
                 });
             }, 1000);
         }
         return () => clearInterval(interval);
     }, [timerState.isRunning]);
 
-    const activeDeck = decks[activeDeckTitle] || decks["Java Collections"];
-    const currentCards = activeDeck.cards;
-    const currentCard = currentCards[currentIndex] || currentCards[0];
-    const deckMastery = activeDeck.mastery_score;
+    const deckTitles = Object.keys(decks);
+    const resolvedDeckTitle = decks[activeDeckTitle]
+        ? activeDeckTitle
+        : deckTitles[0] || "";
+    const activeDeck = resolvedDeckTitle ? decks[resolvedDeckTitle] : null;
+    const currentCards = activeDeck ? activeDeck.cards : [];
+    const safeIndex =
+        currentCards.length > 0 ? Math.min(currentIndex, currentCards.length - 1) : 0;
 
     function flipCard() {
-        setIsFlipped(!isFlipped);
+        if (currentCards.length === 0) return;
+        setIsFlipped((prev) => !prev);
     }
 
     function prevCard() {
+        if (currentCards.length === 0) return;
         setIsFlipped(false);
         setCurrentIndex((prev) => (prev > 0 ? prev - 1 : currentCards.length - 1));
     }
 
     function nextCard() {
+        if (currentCards.length === 0) return;
         setIsFlipped(false);
         setCurrentIndex((prev) => (prev < currentCards.length - 1 ? prev + 1 : 0));
     }
 
+    // Per card persistent mastery update
     function handleMastery(delta, btnColor) {
+        if (!resolvedDeckTitle || !currentCards[safeIndex]) return;
+
         setAnimatingBtn(btnColor);
         setTimeout(() => setAnimatingBtn(null), 300);
 
         setDecks((prevDecks) => {
-            const currentDeck = prevDecks[activeDeckTitle];
-            const newScore = Math.max(-5, Math.min(5, (currentDeck.mastery_score || 0) + delta));
+            const targetDeck = prevDecks[resolvedDeckTitle];
+            if (!targetDeck) return prevDecks;
+
+            const updatedCards = targetDeck.cards.map((card, idx) => {
+                if (idx !== safeIndex) return card;
+                const currentScore =
+                    typeof card.mastery_score === "number" ? card.mastery_score : 0;
+                const newScore = Math.max(-5, Math.min(5, currentScore + delta));
+                return { ...card, mastery_score: newScore };
+            });
+
             return {
                 ...prevDecks,
-                [activeDeckTitle]: {
-                    ...currentDeck,
-                    mastery_score: newScore
-                }
+                [resolvedDeckTitle]: {
+                    ...targetDeck,
+                    cards: updatedCards,
+                },
             };
         });
+
         setTimeout(() => nextCard(), 200);
     }
 
@@ -203,18 +180,75 @@ export default function App() {
         setIsFlipped(false);
     }
 
+    function handleDeleteDeck(titleToDelete) {
+        setDecks((prevDecks) => {
+            if (!prevDecks[titleToDelete]) return prevDecks;
+            const updated = { ...prevDecks };
+            delete updated[titleToDelete];
+
+            if (resolvedDeckTitle === titleToDelete) {
+                const remaining = Object.keys(updated);
+                setActiveDeckTitle(remaining[0] || "");
+                setCurrentIndex(0);
+                setIsFlipped(false);
+            }
+            return updated;
+        });
+        setStatusMsg(`Deleted deck "${titleToDelete}".`);
+    }
+    function handleRestoreStarterDecks() {
+        const starterTitles = Object.keys(INITIAL_DECKS);
+        const missingTitles = starterTitles.filter((title) => !decks[title]);
+
+        if (missingTitles.length > 0) {
+            // Case 1: At least one starter deck was trashed -> restore ONLY missing ones, preserve existing mastery
+            // scores
+            setDecks((prevDecks) => {
+                const updated = { ...prevDecks };
+                for (const title of missingTitles) {
+                    updated[title] = INITIAL_DECKS[title];
+                }
+                return updated;
+            });
+            if (!resolvedDeckTitle) {
+                setActiveDeckTitle(missingTitles[0]);
+                setCurrentIndex(0);
+                setIsFlipped(false);
+            }
+            setStatusMsg(`Restored missing starter deck(s): ${missingTitles.join(", ")}.`);
+        } else {
+            // Case 2: All 4 starter decks are already present -> reset their card mastery scores to 0
+            setDecks((prevDecks) => {
+                const updated = { ...prevDecks };
+                for (const title of starterTitles) {
+                    updated[title] = {
+                        ...updated[title],
+                        cards: updated[title].cards.map((card) => ({
+                            ...card,
+                            mastery_score: 0,
+                        })),
+                    };
+                }
+                return updated;
+            });
+            setStatusMsg("Reset card mastery scores to 0 for all 4 starter decks.");
+        }
+    }
+    // Keyboard shortcuts: Space = flip, 1 = correct (+1), 2 = wrong (-1), Arrows = nav
     useEffect(() => {
         function handleKeyDown(e) {
             if (["INPUT", "TEXTAREA"].includes(document.activeElement?.tagName)) return;
+            if (currentCards.length === 0) return;
+
             if (e.code === "Space") {
                 e.preventDefault();
                 flipCard();
             } else if (e.key === "1") {
                 e.preventDefault();
-                handleMastery(1, 'green');
+                handleMastery(1, "green");
             } else if (e.key === "2") {
                 e.preventDefault();
-                handleMastery(-1, 'red');
+                handleMastery(-1, "red");
             } else if (e.code === "ArrowLeft") {
                 e.preventDefault();
                 prevCard();
@@ -226,61 +260,17 @@ export default function App() {
 
         window.addEventListener("keydown", handleKeyDown);
         return () => window.removeEventListener("keydown", handleKeyDown);
-    }, [currentIndex, activeDeckTitle, decks, isFlipped]);
-
-    const minutes = Math.floor(timerState.timeLeft / 60);
-    const seconds = timerState.timeLeft % 60;
-    const formattedTime = `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
-    const show_seconds = 30;
-
-    let timerWarning = "";
-     if(timerState.isRunning && timerState.mode === "study"){
-           if(timerState.timeLeft <= 900 && timerState.timeLeft > 900 - show_seconds){
-            timerWarning = "15 MINUTES REMAINING!";
-           }else if(timerState.timeLeft <= 600 && timerState.timeLeft > 600 - show_seconds){
-            timerWarning = "10 MINUTES REMAINING!";
-           }else if (timerState.timeLeft <= 300 && timerState.timeLeft > 300 - show_seconds){
-            timerWarning = "5 MINUTES REMAINING!";
-           }
-    }
-
+    }, [safeIndex, resolvedDeckTitle, decks, isFlipped]);
 
     function toggleTimer() {
         setTimerState((prev) => ({ ...prev, isRunning: !prev.isRunning }));
     }
 
     function resetTimer(minutesVal = 25) {
-        setTimerState({ timeLeft: minutesVal * 60, isRunning: false, mode: minutesVal === 25 ? "study" : "rest" });
-    }
-    function extractGeneratedCards(data) {
-        let cardList = [];
-
-        if (Array.isArray(data)) {
-            cardList = data;
-        } else if (data && Array.isArray(data.cards)) {
-            cardList = data.cards;
-        } else if (data && Array.isArray(data.flashcards)) {
-            cardList = data.flashcards;
-        } else if (data && typeof data === "object") {
-            if (typeof data.question === "string" && typeof data.answer === "string") {
-                cardList = [data];
-            } else {
-                const values = Object.values(data);
-                for (let i = 0; i < values.length; i++) {
-                    if (Array.isArray(values[i])) {
-                        cardList = values[i];
-                        break;
-                    }
-                }
-            }
-        }
-
-        return cardList.filter(function (card) {
-            return (
-                card &&
-                typeof card.question === "string" &&
-                typeof card.answer === "string"
-            );
+        setTimerState({
+            timeLeft: minutesVal * 60,
+            isRunning: false,
+            mode: minutesVal === 25 ? "study" : "rest",
         });
     }
 
@@ -290,234 +280,112 @@ export default function App() {
         setStatusMsg("Sending notes to API Gateway...");
 
         try {
-            const response = await fetch("http://localhost:3000/api/groq/generate-flashcards", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ notes: notesInput })
-            });
-
-            let data = {};
-            try {
-                data = await response.json();
-            } catch (parseErr) {
-                console.error("Failed to parse JSON:", parseErr);
-            }
-
-            if (!response.ok) {
-                let errMsg = `Request failed (HTTP ${response.status})`;
-                if (data && data.error) {
-                    errMsg = data.error;
-                } else if (data && data.message) {
-                    errMsg = data.message;
-                }
-                setStatusMsg(`Error: ${errMsg}`);
-                return;
-            }
-
-            const generatedCards = extractGeneratedCards(data);
+            const generatedCards = await generateFlashcardsFromNotes(notesInput);
             if (generatedCards.length === 0) {
-                setStatusMsg("Error: Groq returned no valid flashcards. Try adding more detail to your notes.");
+                setStatusMsg(
+                    "Error: Groq returned no valid flashcards. Try adding more detail to your notes."
+                );
                 return;
             }
 
             const newDeckName = `Generated: ${notesInput.trim().substring(0, 15)}`;
             setDecks((prev) => ({
                 ...prev,
-                [newDeckName]: { mastery_score: 0, cards: generatedCards }
+                [newDeckName]: { cards: generatedCards },
             }));
             setActiveDeckTitle(newDeckName);
             setCurrentIndex(0);
             setIsFlipped(false);
             setNotesInput("");
-            setStatusMsg(`Success! Generated ${generatedCards.length} flashcards in "${newDeckName}".`);
+            setStatusMsg(
+                `Success! Generated ${generatedCards.length} flashcards in "${newDeckName}".`
+            );
         } catch (err) {
             console.error(err);
-            setStatusMsg("Network error: Could not reach API Gateway on port 3000.");
+            if (err instanceof TypeError) {
+                setStatusMsg("Network error: Could not reach API Gateway on port 3000.");
+            } else {
+                setStatusMsg(`Error: ${err.message}`);
+            }
         } finally {
             setIsGenerating(false);
         }
     }
+
     return (
         <div className="app-layout">
-            <button
-                className="sidebar-toggle-floating"
-                onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-                title="Toggle Sidebar">
-                ☰
-            </button>
-
-            <aside className={`sidebar ${isSidebarOpen ? "open" : "closed"}`}>
-                <div className="sidebar-brand">
-                    <img src={logoImg} alt="StudyBuddy Logo" className="brand-logo-img" />
-                </div>
-
-                <nav className="sidebar-nav">
-                    <button
-                        className={`nav-item ${activeTab === "dashboard" ? "active" : ""}`}
-                        onClick={() => setActiveTab("dashboard")}>
-                        Dashboard
-                    </button>
-                    <button
-                        className={`nav-item ${activeTab === "flashcards" ? "active" : ""}`}
-                        onClick={() => setActiveTab("flashcards")}>
-                        Flashcards
-                    </button>
-                    <button
-                        className={`nav-item ${activeTab === "timer" ? "active" : ""}`}
-                        onClick={() => setActiveTab("timer")}>
-                        Timer
-                    </button>
-                </nav>
-
-                <div className="sidebar-footer">
-                    <p>Small steps everyday lead to big results</p>
-                    <div className="footer-star">★</div>
-                </div>
-            </aside>
+            <Sidebar
+                isOpen={isSidebarOpen}
+                onToggle={() => setIsSidebarOpen((prev) => !prev)}
+                activeTab={activeTab}
+                onSelectTab={setActiveTab}
+            />
 
             <main className="main-content">
                 {activeTab === "dashboard" && (
                     <div className="dashboard-grid">
                         <div className="top-row">
-                            <section className="card-box generate-card">
-                                <h3>Generate Flashcards</h3>
-                                <form onSubmit={handleGenerateFlashcards}>
-                                    <textarea
-                                        value={notesInput}
-                                        onChange={(e) => setNotesInput(e.target.value)}
-                                        placeholder="Enter a topic or paste notes below. We'll create flashcards for you!"
-                                        rows={3}
-                                        disabled={isGenerating}
-                                    />
-                                    <button type="submit" className="primary-btn" disabled={isGenerating}>
-                                        {isGenerating && "Generating..."}
-                                        {!isGenerating && "Generate"}
-                                    </button>
-                                </form>
-                                {statusMsg && <p className="status-note">{statusMsg}</p>}
-                            </section>
+                            <GenerateForm
+                                notesInput={notesInput}
+                                onNotesChange={setNotesInput}
+                                onSubmit={handleGenerateFlashcards}
+                                isGenerating={isGenerating}
+                                statusMsg={statusMsg}
+                            />
 
-                            <section className="card-box timer-card">
-                                <h3>Timer</h3>
-                                <div className="timer-display">{formattedTime}</div>
-                                <div className="timer-warning-slot">
-                                    {timerWarning && <span key={timerWarning} className="timer-warning">{timerWarning}</span>}
-                                </div>
-                                <div className="timer-controls">
-                                    <button onClick={toggleTimer} className="icon-btn">
-                                        {timerState.isRunning ? "❚❚" : "▶"}
-                                    </button>
-                                    <button onClick={() => resetTimer(timerState.mode === "study" ? 25 : 5)} className="icon-btn">
-                                        ↻
-                                    </button>
-                                </div>
-                                <div className="timer-mode-buttons">
-                                    <button onClick={() => resetTimer(25)} className={`mode-btn ${timerState.timeLeft === 1500 ? "active-mode" : ""}`}>Study (25m)</button>
-                                    <button onClick={() => resetTimer(5)} className={`mode-btn ${timerState.timeLeft === 300 ? "active-mode" : ""}`}>Rest (5m)</button>
-                                </div>
-                            </section>
+                            <PomodoroTimer
+                                timerState={timerState}
+                                onToggle={toggleTimer}
+                                onReset={resetTimer}
+                            />
                         </div>
 
                         <div className="bottom-row">
-                            <section className="card-box viewer-card">
-                                <div className="viewer-header">
-                                    <span>Flashcards ({activeDeckTitle})</span>
-                                    <span className="subtitle-hint">Review and build knowledge</span>
-                                </div>
+                            <FlashcardViewer
+                                activeDeckTitle={resolvedDeckTitle}
+                                currentCards={currentCards}
+                                currentIndex={safeIndex}
+                                isFlipped={isFlipped}
+                                animatingBtn={animatingBtn}
+                                onFlip={flipCard}
+                                onPrev={prevCard}
+                                onNext={nextCard}
+                                onMastery={handleMastery}
+                            />
 
-                                <div
-                                    className="flashcard-preview"
-                                    onClick={flipCard}>
-                                    <div className="fc-top-left-badge">
-                                        Mastery: {deckMastery}
-                                    </div>
-                                    <div className="fc-counter">
-                                        {currentIndex + 1} / {currentCards.length}
-                                    </div>
-                                    <div className="fc-body">
-                                        <p>{isFlipped ? currentCard.answer : currentCard.question}</p>
-                                    </div>
-                                    <div className="fc-action-prompt">
-                                        {isFlipped ? "Showing Answer (Space to flip)" : "See answer (Spacebar)"}
-                                    </div>
-                                </div>
-
-                                <div className="flashcard-nav-controls">
-                                    <button onClick={prevCard} className="nav-action-btn">← Previous</button>
-
-                                    <div className="grading-buttons">
-                                        <button
-                                            onClick={() => handleMastery(-1, 'red')}
-                                            className={`glass-grade-btn red-glass ${animatingBtn === 'red' ? 'pulse-red' : ''}`}
-                                            title="Incorrect (Press 2)">
-                                            ✕
-                                        </button>
-                                        <button
-                                            onClick={() => handleMastery(1, 'green')}
-                                            className={`glass-grade-btn green-glass ${animatingBtn === 'green' ? 'pulse-green' : ''}`}
-                                            title="Got it (Press 1)">
-                                            ✓
-                                        </button>
-                                    </div>
-
-                                    <button onClick={nextCard} className="nav-action-btn">Next →</button>
-                                </div>
-                            </section>
-
-                            <section className="card-box decks-card">
-                                <h3>Decks</h3>
-                                <div className="decks-list">
-                                    {Object.keys(decks).map((title) => (
-                                        <div
-                                            key={title}
-                                            className={`deck-item ${activeDeckTitle === title ? "active-deck" : ""}`}
-                                            onClick={() => selectDeck(title)}>
-                                            <span>{title}</span>
-                                            <span className="arrow">&gt;</span>
-                                        </div>
-                                    ))}
-                                </div>
-                            </section>
+                            <DeckList
+                                decks={decks}
+                                activeDeckTitle={resolvedDeckTitle}
+                                onSelectDeck={selectDeck}
+                                onDeleteDeck={handleDeleteDeck}
+                                onRestoreStarterDecks={handleRestoreStarterDecks}
+                            />
                         </div>
                     </div>
                 )}
 
                 {activeTab === "flashcards" && (
-                    <div className="fullscreen-flashcards">
-                        <h2>{activeDeckTitle} - Fullscreen Study!</h2>
-                        <div
-                            className="flashcard-preview fullscreen-fc"
-                            onClick={flipCard}>
-                            <div className="fc-top-left-badge">Mastery: {deckMastery}</div>
-                            <div className="fc-counter">{currentIndex + 1} / {currentCards.length}</div>
-                            <div className="fc-body">
-                                <p className="fs-text">{isFlipped ? currentCard.answer : currentCard.question}</p>
-                            </div>
-                        </div>
-                        <div className="flashcard-nav-controls">
-                            <button onClick={prevCard} className="nav-action-btn">← Previous</button>
-                            <button onClick={() => handleMastery(-1, 'red')} className={`glass-grade-btn red-glass ${animatingBtn === 'red' ? 'pulse-red' : ''}`}>✕</button>
-                            <button onClick={() => handleMastery(1, 'green')} className={`glass-grade-btn green-glass ${animatingBtn === 'green' ? 'pulse-green' : ''}`}>✓</button>
-                            <button onClick={nextCard} className="nav-action-btn">Next →</button>
-                        </div>
-                    </div>
+                    <FlashcardViewer
+                        activeDeckTitle={resolvedDeckTitle}
+                        currentCards={currentCards}
+                        currentIndex={safeIndex}
+                        isFlipped={isFlipped}
+                        animatingBtn={animatingBtn}
+                        onFlip={flipCard}
+                        onPrev={prevCard}
+                        onNext={nextCard}
+                        onMastery={handleMastery}
+                        isFullscreen
+                    />
                 )}
 
                 {activeTab === "timer" && (
-                    <div className="fullscreen-timer">
-                        <h2>Focus Timer</h2>
-                        <div className="big-timer-display">{formattedTime}</div>
-                        <div className="timer-warning-slot">
-                            {timerWarning && <span key={timerWarning} className="timer-warning">{timerWarning}</span>}
-                        </div>
-                        <div className="timer-controls big-controls">
-                            <button onClick={toggleTimer} className="primary-btn">
-                                {timerState.isRunning ? "Pause" : "Start"}
-                            </button>
-                            <button onClick={() => resetTimer(25)} className="nav-action-btn">Reset (25m)</button>
-                            <button onClick={() => resetTimer(5)} className="nav-action-btn">Rest (5m)</button>
-                        </div>
-                    </div>
+                    <PomodoroTimer
+                        timerState={timerState}
+                        onToggle={toggleTimer}
+                        onReset={resetTimer}
+                        isFullscreen
+                    />
                 )}
             </main>
         </div>
