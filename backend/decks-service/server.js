@@ -1,13 +1,30 @@
 import dotenv from "dotenv";
-
-import pool from "../lib/db.js";
-dotenv.config({ path: "../.env" });
 import express from "express";
+import {
+    getAllDecks,
+    getDeckById,
+    createDeck,
+    updateDeck,
+    deleteDeck,
+    addCardToDeck,
+    updateCardMastery,
+    getLowMasteryCards,
+    restoreStarterDecks,
+} from "./db.js";
+// Check for a .env file in this folder first; if none exists yet, use the shared backend/.env
+dotenv.config();
+dotenv.config({ path: "../.env" });
+
 const app = express();
 const PORT = process.env.PORT || 3002;
 const SERVICE_API_KEY = process.env.SERVICE_API_KEY || "tcss460-secret";
 
 app.use(express.json());
+
+// Public health check for gateway monitoring
+app.get("/health", (req, res) => {
+    res.json({ status: "ok", service: "decks-service", port: Number(PORT) });
+});
 
 function requireApiKey(req, res, next) {
     if (req.header("x-api-key") !== SERVICE_API_KEY) {
@@ -17,80 +34,197 @@ function requireApiKey(req, res, next) {
     }
     next();
 }
-app.post("/add", requireApiKey, async (req, res) => {
-    const { deck, title } = req.body;
-    if (!deck || !Array.isArray(deck) || deck.length === 0) {
-        return res.status(400).json({ message: "Invalid Request" });
-    }
+// List all decks with their cards
+app.get("/decks", requireApiKey, async (req, res) => {
     try {
-        const [deckResult] = await pool.query(
-            `INSERT INTO decks (title) VALUES (?)`,
-            [title]
-        );
-        const values = deck.map((card) => [card.question, card.answer, deckID]);
-        const deckID = deckResult.insertId;
-        if (!deckID) {
-            throw new Error(deckResult.message);
+        const decks = await getAllDecks(req.query.userId);
+        res.status(200).json({ decks });
+    } catch (err) {
+        console.error("GET /decks error:", err);
+        res.status(500).json({ error: "Failed to load decks." });
+    }
+});
+// Must be registered before /decks/:deckId
+app.post("/decks/restore-starter", requireApiKey, async (req, res) => {
+    try {
+        const decks = await restoreStarterDecks();
+        res.status(200).json({
+            message: "Starter decks restored and starter card mastery scores reset to 0.",
+            decks,
+        });
+    } catch (err) {
+        console.error("POST /decks/restore-starter error:", err);
+        res.status(500).json({ error: "Failed to restore starter decks." });
+    }
+});
+// Get one deck by ID
+app.get("/decks/:deckId", requireApiKey, async (req, res) => {
+    try {
+        const deck = await getDeckById(req.params.deckId);
+        if (!deck) {
+            return res
+                .status(404)
+                .json({ error: `Deck '${req.params.deckId}' was not found.` });
         }
-        const [result] = await pool.query(
-            `
-            INSERT INTO flashcards (question, answer, deck_id)
-            VALUES ?
-        `,
-            [values]
-        );
-
-        res.status(201).json({
-            message: "Flashcards added successfully",
-            insertedCount: result.affectedRows
-        });
+        res.status(200).json(deck);
     } catch (err) {
-        console.error(err);
-
-        return res.status(500).json({
-            error: err.message || "Issue with insertion into database."
-        });
+        console.error("GET /decks/:deckId error:", err);
+        res.status(500).json({ error: "Failed to fetch deck." });
     }
 });
 
-app.get("/", requireApiKey, async (req, res) => {
-    const { deckID } = req.query;
-
+// Create a new deck with optional initial cards
+app.post("/decks", requireApiKey, async (req, res) => {
     try {
-        const [result] = await pool.query(
-            `SELECT * FROM decks ${deckID ? "WHERE deck_id = ?" : ""}`,
-            deckID ? [deckID] : []
-        );
+        const { title, userId, cards } = req.body || {};
+        if (typeof title !== "string" || !title.trim()) {
+            return res
+                .status(400)
+                .json({ error: "Deck title is required and must be a non-empty string." });
+        }
+        if (cards !== undefined && !Array.isArray(cards)) {
+            return res.status(400).json({ error: "cards must be an array." });
+        }
 
-        res.status(200).json(deckID ? result[0] : result);
+        const created = await createDeck({ title, userId, cards });
+        res.status(201).json(created);
     } catch (err) {
-        console.error(err);
-
-        return res.status(500).json({
-            error: err.message || "Issue with insertion into database."
-        });
+        console.error("POST /decks error:", err);
+        res.status(500).json({ error: "Failed to create deck." });
     }
 });
-app.delete("/:id", async (req, res) => {
-    const { id } = req.params;
-    if (!id) {
-        return res.status(400).json({ error: "Invalid Request!" });
-    }
+
+// Rename an existing deck
+app.put("/decks/:deckId", requireApiKey, async (req, res) => {
     try {
-        const [result] = await pool.query(
-            `DELETE FROM decks WHERE deck_id = ?}`,
-            [id]
-        );
+        const { title } = req.body || {};
+        if (typeof title !== "string" || !title.trim()) {
+            return res
+                .status(400)
+                .json({ error: "Deck title is required and must be a non-empty string." });
+        }
 
-        res.status(202).json({ message: "Sucessfully deleted deck!" });
+        const updated = await updateDeck(req.params.deckId, { title });
+        if (!updated) {
+            return res
+                .status(404)
+                .json({ error: `Deck '${req.params.deckId}' was not found.` });
+        }
+        res.status(200).json(updated);
     } catch (err) {
-        console.error(err);
-
-        return res.status(500).json({
-            error: err.message || "Issue with insertion into database."
-        });
+        console.error("PUT /decks/:deckId error:", err);
+        res.status(500).json({ error: "Failed to update deck." });
     }
 });
+
+// Delete a deck and its flashcards
+app.delete("/decks/:deckId", requireApiKey, async (req, res) => {
+    try {
+        const deleted = await deleteDeck(req.params.deckId);
+        if (!deleted) {
+            return res
+                .status(404)
+                .json({ error: `Deck '${req.params.deckId}' was not found.` });
+        }
+        res.status(204).send();
+    } catch (err) {
+        console.error("DELETE /decks/:deckId error:", err);
+        res.status(500).json({ error: "Failed to delete deck." });
+    }
+});
+
+// Add a single flashcard to an existing deck
+app.post("/decks/:deckId/cards", requireApiKey, async (req, res) => {
+    try {
+        const { question, answer, mastery_score } = req.body || {};
+        if (
+            typeof question !== "string" ||
+            !question.trim() ||
+            typeof answer !== "string" ||
+            !answer.trim()
+        ) {
+            return res
+                .status(400)
+                .json({ error: "Both question and answer must be non-empty strings." });
+        }
+
+        const card = await addCardToDeck(req.params.deckId, {
+            question,
+            answer,
+            mastery_score,
+        });
+        if (!card) {
+            return res
+                .status(404)
+                .json({ error: `Deck '${req.params.deckId}' was not found.` });
+        }
+        res.status(201).json(card);
+    } catch (err) {
+        console.error("POST /decks/:deckId/cards error:", err);
+        res.status(500).json({ error: "Failed to add flashcard." });
+    }
+});
+
+// Query cards below a mastery threshold (used by groq-service tool calls)
+app.get("/cards/low-mastery", requireApiKey, async (req, res) => {
+    try {
+        const threshold =
+            req.query.threshold !== undefined ? Number(req.query.threshold) : 0;
+        if (Number.isNaN(threshold)) {
+            return res.status(400).json({ error: "threshold must be a valid number." });
+        }
+
+        const cards = await getLowMasteryCards({
+            userId: req.query.userId,
+            deckId: req.query.deckId,
+            threshold,
+        });
+        res.status(200).json({ cards });
+    } catch (err) {
+        console.error("GET /cards/low-mastery error:", err);
+        res.status(500).json({ error: "Failed to fetch low-mastery cards." });
+    }
+});
+
+// Update card mastery_score by delta (+1 / -1) or explicit value
+app.patch("/cards/:cardId", requireApiKey, async (req, res) => {
+    try {
+        const { delta, mastery_score } = req.body || {};
+        const hasDelta = typeof delta === "number" && !Number.isNaN(delta);
+        const hasScore =
+            typeof mastery_score === "number" && !Number.isNaN(mastery_score);
+
+        if (!hasDelta && !hasScore) {
+            return res.status(400).json({
+                error: "Provide a numeric delta (e.g., 1 or -1) or mastery_score (-5 to 5).",
+            });
+        }
+
+        const updated = await updateCardMastery(req.params.cardId, {
+            delta: hasDelta ? delta : undefined,
+            mastery_score: hasScore ? mastery_score : undefined,
+        });
+
+        if (!updated) {
+            return res
+                .status(404)
+                .json({ error: `Flashcard '${req.params.cardId}' was not found.` });
+        }
+        res.status(200).json(updated);
+    } catch (err) {
+        console.error("PATCH /cards/:cardId error:", err);
+        res.status(500).json({ error: "Failed to update flashcard mastery." });
+    }
+});
+
+app.use((req, res) => {
+    res.status(404).json({ error: `No route for ${req.method} ${req.path}.` });
+});
+
+app.use((err, req, res, next) => {
+    res.status(err.status || 400).json({ error: "Request body is not valid JSON." });
+});
+
 app.listen(PORT, () => {
     console.log(`Decks Service running at http://localhost:${PORT}`);
 });
