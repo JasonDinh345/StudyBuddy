@@ -14,3 +14,5 @@
 .DS_Store
 node_modules/
 .env
+dist/
+backend/decks-service/data/db.json
