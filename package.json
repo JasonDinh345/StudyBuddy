@@ -1,0 +1,13 @@
+{
+  "name": "studybuddy",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "install-all": "npm install && npm --prefix frontend install && npm --prefix backend/api-gateway install && npm --prefix backend/decks-service install && npm --prefix backend/groq-service install",
+    "start": "concurrently -n GATEWAY,GROQ,DECKS,WEB -c blue,magenta,green,cyan \"npm --prefix backend/api-gateway start\" \"npm --prefix backend/groq-service start\" \"npm --prefix backend/decks-service start\" \"npm --prefix frontend run dev\"",
+    "seed": "node backend/decks-service/seed.js"
+  },
+  "devDependencies": {
+    "concurrently": "^10.0.7"
+  }
+}
