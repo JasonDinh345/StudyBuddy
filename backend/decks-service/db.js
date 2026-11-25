@@ -13,14 +13,18 @@ import {
 const dataDir = fileURLToPath(new URL("./data", import.meta.url));
 const dbPath = path.join(dataDir, "db.json");
 
-await mkdir(dataDir, { recursive: true });
-
-export const db = await JSONFilePreset(dbPath, {
-    users: [],
-    decks: [],
-    flashcards: [],
-});
-
+let dbInstance = null;
+async function getDb() {
+    if (!dbInstance) {
+        await mkdir(dataDir, { recursive: true });
+        dbInstance = await JSONFilePreset(dbPath, {
+            users: [],
+            decks: [],
+            flashcards: [],
+        });
+    }
+    return dbInstance;
+}
 function clampMastery(score) {
     return Math.max(-5, Math.min(5, score));
 }
@@ -33,7 +37,7 @@ function attachCards(decks, flashcards) {
 }
 
 export async function getAllDecks(userId) {
-    await db.read();
+    const db=await getDb();
     const filteredDecks = userId
         ? db.data.decks.filter((d) => d.userId === userId)
         : db.data.decks;
@@ -41,7 +45,7 @@ export async function getAllDecks(userId) {
 }
 
 export async function getDeckById(deckId) {
-    await db.read();
+    const db=await getDb();
     const deck = db.data.decks.find((d) => d.id === deckId);
     if (!deck) return null;
     const cards = db.data.flashcards.filter((c) => c.deckId === deckId);
@@ -49,7 +53,7 @@ export async function getDeckById(deckId) {
 }
 
 export async function createDeck({ title, userId = DEMO_USER_ID, cards = [] }) {
-    await db.read();
+    const db=await getDb();
 
     const newDeck = {
         id: crypto.randomUUID(),
@@ -86,7 +90,7 @@ export async function createDeck({ title, userId = DEMO_USER_ID, cards = [] }) {
 }
 
 export async function updateDeck(deckId, { title }) {
-    await db.read();
+    const db=await getDb();
     const deck = db.data.decks.find((d) => d.id === deckId);
     if (!deck) return null;
 
@@ -98,7 +102,7 @@ export async function updateDeck(deckId, { title }) {
 }
 
 export async function deleteDeck(deckId) {
-    await db.read();
+    const db=await getDb();
     const idx = db.data.decks.findIndex((d) => d.id === deckId);
     if (idx === -1) return false;
 
@@ -112,7 +116,7 @@ export async function addCardToDeck(
     deckId,
     { question, answer, mastery_score = 0 }
 ) {
-    await db.read();
+    const db=await getDb();
     const deck = db.data.decks.find((d) => d.id === deckId);
     if (!deck) return null;
 
@@ -132,7 +136,7 @@ export async function addCardToDeck(
 }
 
 export async function updateCardMastery(cardId, { delta, mastery_score }) {
-    await db.read();
+    const db=await getDb();
     const card = db.data.flashcards.find((c) => c.id === cardId);
     if (!card) return null;
 
@@ -148,9 +152,8 @@ export async function updateCardMastery(cardId, { delta, mastery_score }) {
     await db.write();
     return card;
 }
-
 export async function getLowMasteryCards({ userId, deckId, threshold = 0 } = {}) {
-    await db.read();
+    const db = await getDb();
     return db.data.flashcards
         .filter((card) => {
             if (userId && card.userId !== userId) return false;
@@ -159,33 +162,41 @@ export async function getLowMasteryCards({ userId, deckId, threshold = 0 } = {})
         })
         .sort((a, b) => a.mastery_score - b.mastery_score);
 }
-
 export async function restoreStarterDecks() {
-    await db.read();
+    const db = await getDb();
 
     // Make sure the demo user record exists
     if (!db.data.users.some((u) => u.id === STARTER_USER.id)) {
         db.data.users.push({ ...STARTER_USER });
     }
 
-    // Re-insert any deleted starter decks without touching user or AI decks
+    // Find which starter decks were actually trashed
     const existingDeckIds = new Set(db.data.decks.map((d) => d.id));
+    const missingDeckIds = new Set();
+    const restoredTitles = [];
+
     for (const starterDeck of STARTER_DECKS) {
         if (!existingDeckIds.has(starterDeck.id)) {
             db.data.decks.push({ ...starterDeck });
+            missingDeckIds.add(starterDeck.id);
+            restoredTitles.push(starterDeck.title);
         }
     }
 
-    // Re-insert missing starter cards or reset existing starter cards to mastery_score 0
+    // Only insert cards for restored starter decks at mastery_score: 0
+    const existingCardIds = new Set(db.data.flashcards.map((c) => c.id));
     for (const starterCard of STARTER_FLASHCARDS) {
-        const existingCard = db.data.flashcards.find((c) => c.id === starterCard.id);
-        if (existingCard) {
-            existingCard.mastery_score = 0;
-        } else {
+        if (missingDeckIds.has(starterCard.deckId) && !existingCardIds.has(starterCard.id)) {
             db.data.flashcards.push({ ...starterCard, mastery_score: 0 });
         }
     }
 
-    await db.write();
-    return attachCards(db.data.decks, db.data.flashcards);
+    if (restoredTitles.length > 0) {
+        await db.write();
+    }
+
+    return {
+        decks: attachCards(db.data.decks, db.data.flashcards),
+        restoredTitles,
+    };
 }

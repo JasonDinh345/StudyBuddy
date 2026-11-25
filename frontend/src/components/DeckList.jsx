@@ -40,26 +40,29 @@ function TrashCanIcon({ isOpen, isDragOver }) {
 
 export default function DeckList({
                                      decks,
-                                     activeDeckTitle,
+                                     activeDeckId,
+                                     isLoadingDecks,
+                                     decksError,
+                                     isRestoring,
+                                     restoreMsg,
                                      onSelectDeck,
                                      onDeleteDeck,
                                      onRestoreStarterDecks,
                                  }) {
     const [isTrashOpen, setIsTrashOpen] = useState(false);
     const [isDragOverTrash, setIsDragOverTrash] = useState(false);
-    const [draggingDeck, setDraggingDeck] = useState(null);
+    const [draggingDeckId, setDraggingDeckId] = useState(null);
 
-    const deckTitles = Object.keys(decks);
     const lidShouldBeOpen = isTrashOpen || isDragOverTrash;
 
-    function handleDragStart(e, title) {
-        e.dataTransfer.setData("text/plain", title);
+    function handleDragStart(e, deckId) {
+        e.dataTransfer.setData("text/plain", deckId);
         e.dataTransfer.effectAllowed = "move";
-        setDraggingDeck(title);
+        setDraggingDeckId(deckId);
     }
 
     function handleDragEnd() {
-        setDraggingDeck(null);
+        setDraggingDeckId(null);
         setIsDragOverTrash(false);
     }
 
@@ -71,11 +74,11 @@ export default function DeckList({
 
     function handleDropOnTrash(e) {
         e.preventDefault();
-        const droppedTitle = e.dataTransfer.getData("text/plain") || draggingDeck;
+        const droppedId = e.dataTransfer.getData("text/plain") || draggingDeckId;
         setIsDragOverTrash(false);
-        setDraggingDeck(null);
-        if (droppedTitle) {
-            onDeleteDeck(droppedTitle);
+        setDraggingDeckId(null);
+        if (droppedId) {
+            onDeleteDeck(droppedId);
         }
     }
 
@@ -107,9 +110,8 @@ export default function DeckList({
                 </button>
             </div>
 
-            {/* Fixed-height slot prevents layout shift when dragging */}
             <div className="trash-hint-slot">
-                {(isTrashOpen || draggingDeck) && (
+                {(isTrashOpen || draggingDeckId) && (
                     <p className={`trash-hint ${isDragOverTrash ? "ready-drop" : ""}`}>
                         {isDragOverTrash
                             ? "Release to remove deck"
@@ -118,25 +120,35 @@ export default function DeckList({
                 )}
             </div>
 
+            {decksError && (
+                <p className="deck-error-banner" role="alert">
+                    {decksError}
+                </p>
+            )}
+
             <div className="decks-list">
-                {deckTitles.length === 0 ? (
+                {isLoadingDecks ? (
+                    <p className="subtitle-hint">Loading decks...</p>
+                ) : decks.length === 0 ? (
                     <p className="subtitle-hint">
                         No decks left. Restore starter decks below or generate new ones!
                     </p>
                 ) : (
-                    deckTitles.map((title) => (
+                    decks.map((deck) => (
                         <div
-                            key={title}
+                            key={deck.id}
                             draggable
-                            onDragStart={(e) => handleDragStart(e, title)}
+                            onDragStart={(e) => handleDragStart(e, deck.id)}
                             onDragEnd={handleDragEnd}
                             className={`deck-item ${
-                                activeDeckTitle === title ? "active-deck" : ""
-                            } ${draggingDeck === title ? "is-dragging" : ""}`}
-                            onClick={() => onSelectDeck(title)}
+                                activeDeckId === deck.id ? "active-deck" : ""
+                            } ${draggingDeckId === deck.id ? "is-dragging" : ""}`}
+                            onClick={() => onSelectDeck(deck.id)}
                             title="Click to study, or drag to trash icon to remove"
                         >
-                            <span>{title}</span>
+                            <span>
+                                {deck.title} ({deck.cards?.length || 0})
+                            </span>
                             <span className="arrow">&gt;</span>
                         </div>
                     ))
@@ -148,10 +160,12 @@ export default function DeckList({
                     type="button"
                     className="restore-starter-btn"
                     onClick={onRestoreStarterDecks}
-                    title="Restores missing starter decks, or resets mastery scores to 0 if all 4 exist"
+                    disabled={isRestoring}
+                    title="Restores missing starter decks and resets starter card mastery scores to 0"
                 >
-                    Restore Starter Decks
+                    {isRestoring ? "Restoring..." : "Restore Starter Decks"}
                 </button>
+                {restoreMsg && <p className="restore-status">{restoreMsg}</p>}
             </div>
         </section>
     );

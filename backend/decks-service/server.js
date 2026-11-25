@@ -45,11 +45,18 @@ app.get("/decks", requireApiKey, async (req, res) => {
     }
 });
 // Must be registered before /decks/:deckId
+// Must be registered before /decks/:deckId
 app.post("/decks/restore-starter", requireApiKey, async (req, res) => {
     try {
-        const decks = await restoreStarterDecks();
+        const { decks, restoredTitles } = await restoreStarterDecks();
+        const message =
+            restoredTitles.length > 0
+                ? `Restored ${restoredTitles.join(", ")} (mastery scores reset to 0).`
+                : "Nothing to restore — all starter decks are already present.";
+
         res.status(200).json({
-            message: "Starter decks restored and starter card mastery scores reset to 0.",
+            message,
+            restoredCount: restoredTitles.length,
             decks,
         });
     } catch (err) {

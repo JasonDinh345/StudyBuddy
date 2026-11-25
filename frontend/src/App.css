@@ -626,3 +626,44 @@ body {
 .restore-starter-btn:active {
   transform: translateY(0);
 }
+.decks-footer {
+  flex-direction: column;
+  gap: 8px;
+}
+
+.restore-starter-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.restore-status {
+  margin: 0;
+  font-size: 0.78rem;
+  color: #15803d;
+  background: #dcfce7;
+  border-radius: 8px;
+  padding: 6px 10px;
+}
+
+.deck-error-banner {
+  margin: 0 0 10px 0;
+  font-size: 0.8rem;
+  color: #b91c1c;
+  background: #fee2e2;
+  border: 1px solid #fecaca;
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+.status-note,
+.restore-status {
+  animation: statusFadeOut 1s ease forwards 9s;
+}
+
+@keyframes statusFadeOut {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}

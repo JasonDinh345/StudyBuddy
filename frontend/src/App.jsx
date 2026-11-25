@@ -1,31 +1,18 @@
 import { useState, useEffect } from "react";
 import "./App.css";
-import { INITIAL_DECKS } from "./data/initialDecks";
-import { generateFlashcardsFromNotes } from "./services/api";
+import {
+    fetchDecks,
+    createDeck,
+    deleteDeck,
+    updateCardMastery,
+    restoreStarterDecks,
+    generateFlashcardsFromNotes,
+} from "./services/api";
 import Sidebar from "./components/Sidebar";
 import GenerateForm from "./components/GenerateForm";
 import PomodoroTimer from "./components/PomodoroTimer";
 import FlashcardViewer from "./components/FlashcardViewer";
 import DeckList from "./components/DeckList";
-
-const DECKS_STORAGE_KEY = "studybuddy_card_mastery_v9";
-
-function normalizeDecks(rawDecks) {
-    const normalized = {};
-    for (const [title, deck] of Object.entries(rawDecks || {})) {
-        const cards = Array.isArray(deck?.cards) ? deck.cards : [];
-        normalized[title] = {
-            cards: cards.map((card, idx) => ({
-                id: card.id ?? card.card_id ?? `${title}-${idx}`,
-                question: card.question,
-                answer: card.answer,
-                mastery_score:
-                    typeof card.mastery_score === "number" ? card.mastery_score : 0,
-            })),
-        };
-    }
-    return normalized;
-}
 
 export default function App() {
     const [activeTab, setActiveTab] = useState(
@@ -37,28 +24,26 @@ export default function App() {
         return saved !== null ? JSON.parse(saved) : true;
     });
 
-    const [decks, setDecks] = useState(() => {
-        try {
-            const savedV9 = localStorage.getItem(DECKS_STORAGE_KEY);
-            if (savedV9) return normalizeDecks(JSON.parse(savedV9));
+    const [decks, setDecks] = useState([]);
+    const [isLoadingDecks, setIsLoadingDecks] = useState(true);
+    const [decksError, setDecksError] = useState("");
+    const [isRestoring, setIsRestoring] = useState(false);
+    const [restoreMsg, setRestoreMsg] = useState("");
 
-            // Migrate any existing v8 decks smoothly so generated decks aren't lost
-            const savedV8 = localStorage.getItem("studybuddy_deck_mastery_v8");
-            if (savedV8) return normalizeDecks(JSON.parse(savedV8));
-        } catch (e) {
-            console.error(e);
-        }
-        return INITIAL_DECKS;
-    });
-
-    const [activeDeckTitle, setActiveDeckTitle] = useState(() => {
-        const saved = localStorage.getItem("studybuddy_active_title");
-        return saved || "Java Collections";
-    });
-
-    const [currentIndex, setCurrentIndex] = useState(() =>
-        Number(localStorage.getItem("studybuddy_card_index") || 0)
+    const [activeDeckId, setActiveDeckId] = useState(
+        () => localStorage.getItem("studybuddy_active_deck_id") || ""
     );
+
+    // Track each deck's current card index by deckId so switching decks remembers your slide
+    const [deckIndices, setDeckIndices] = useState(() => {
+        try {
+            const saved = localStorage.getItem("studybuddy_deck_indices");
+            return saved ? JSON.parse(saved) : {};
+        } catch {
+            return {};
+        }
+    });
+
     const [isFlipped, setIsFlipped] = useState(false);
     const [notesInput, setNotesInput] = useState("");
     const [statusMsg, setStatusMsg] = useState("");
@@ -75,7 +60,41 @@ export default function App() {
         return { timeLeft: 25 * 60, isRunning: false, mode: "study" };
     });
 
-    // Persist states to localStorage
+    // Load persisted decks from decks-service via API Gateway
+    useEffect(() => {
+        let cancelled = false;
+
+        async function loadDecks() {
+            setIsLoadingDecks(true);
+            setDecksError("");
+            try {
+                const loaded = await fetchDecks();
+                if (!cancelled) {
+                    setDecks(loaded);
+                    if (loaded.length > 0) {
+                        setActiveDeckId((prev) =>
+                            loaded.some((d) => d.id === prev) ? prev : loaded[0].id
+                        );
+                    }
+                }
+            } catch (err) {
+                if (!cancelled) {
+                    setDecksError(
+                        `${err.message} (Decks service may be stopped; timer still works.)`
+                    );
+                }
+            } finally {
+                if (!cancelled) setIsLoadingDecks(false);
+            }
+        }
+
+        loadDecks();
+        return () => {
+            cancelled = true;
+        };
+    }, []);
+
+    // Persist UI preferences, per-deck slide indices, and timer state locally
     useEffect(() => {
         localStorage.setItem("studybuddy_tab", activeTab);
     }, [activeTab]);
@@ -85,22 +104,20 @@ export default function App() {
     }, [isSidebarOpen]);
 
     useEffect(() => {
-        localStorage.setItem("studybuddy_active_title", activeDeckTitle);
-    }, [activeDeckTitle]);
+        if (activeDeckId) {
+            localStorage.setItem("studybuddy_active_deck_id", activeDeckId);
+        }
+    }, [activeDeckId]);
 
     useEffect(() => {
-        localStorage.setItem("studybuddy_card_index", String(currentIndex));
-    }, [currentIndex]);
-
-    useEffect(() => {
-        localStorage.setItem(DECKS_STORAGE_KEY, JSON.stringify(decks));
-    }, [decks]);
+        localStorage.setItem("studybuddy_deck_indices", JSON.stringify(deckIndices));
+    }, [deckIndices]);
 
     useEffect(() => {
         localStorage.setItem("studybuddy_timer_v8", JSON.stringify(timerState));
     }, [timerState]);
 
-    // Pomodoro interval
+    // Pomodoro countdown interval
     useEffect(() => {
         let interval = null;
         if (timerState.isRunning) {
@@ -116,15 +133,27 @@ export default function App() {
         }
         return () => clearInterval(interval);
     }, [timerState.isRunning]);
+    // Autoclear statusMsg (Generate/Delete feedback) after 10 seconds
+    useEffect(() => {
+        if (!statusMsg) return;
+        const timer = setTimeout(() => setStatusMsg(""), 10000);
+        return () => clearTimeout(timer);
+    }, [statusMsg]);
 
-    const deckTitles = Object.keys(decks);
-    const resolvedDeckTitle = decks[activeDeckTitle]
-        ? activeDeckTitle
-        : deckTitles[0] || "";
-    const activeDeck = resolvedDeckTitle ? decks[resolvedDeckTitle] : null;
-    const currentCards = activeDeck ? activeDeck.cards : [];
+    // Autoclear restoreMsg (Restore Starter Decks pill) after 10 seconds
+    useEffect(() => {
+        if (!restoreMsg) return;
+        const timer = setTimeout(() => setRestoreMsg(""), 10000);
+        return () => clearTimeout(timer);
+    }, [restoreMsg]);
+
+    const activeDeck = decks.find((d) => d.id === activeDeckId) || decks[0] || null;
+    const resolvedDeckId = activeDeck ? activeDeck.id : "";
+    const resolvedDeckTitle = activeDeck ? activeDeck.title : "";
+    const currentCards = activeDeck?.cards || [];
+    const rawIndex = resolvedDeckId ? deckIndices[resolvedDeckId] ?? 0 : 0;
     const safeIndex =
-        currentCards.length > 0 ? Math.min(currentIndex, currentCards.length - 1) : 0;
+        currentCards.length > 0 ? Math.min(rawIndex, currentCards.length - 1) : 0;
 
     function flipCard() {
         if (currentCards.length === 0) return;
@@ -132,108 +161,141 @@ export default function App() {
     }
 
     function prevCard() {
-        if (currentCards.length === 0) return;
+        if (!resolvedDeckId || currentCards.length === 0) return;
         setIsFlipped(false);
-        setCurrentIndex((prev) => (prev > 0 ? prev - 1 : currentCards.length - 1));
+        setDeckIndices((prev) => {
+            const curr = Math.min(prev[resolvedDeckId] ?? 0, currentCards.length - 1);
+            return {
+                ...prev,
+                [resolvedDeckId]: curr > 0 ? curr - 1 : currentCards.length - 1,
+            };
+        });
     }
 
     function nextCard() {
-        if (currentCards.length === 0) return;
+        if (!resolvedDeckId || currentCards.length === 0) return;
         setIsFlipped(false);
-        setCurrentIndex((prev) => (prev < currentCards.length - 1 ? prev + 1 : 0));
+        setDeckIndices((prev) => {
+            const curr = Math.min(prev[resolvedDeckId] ?? 0, currentCards.length - 1);
+            return {
+                ...prev,
+                [resolvedDeckId]: curr < currentCards.length - 1 ? curr + 1 : 0,
+            };
+        });
     }
 
-    // Per card persistent mastery update
-    function handleMastery(delta, btnColor) {
-        if (!resolvedDeckTitle || !currentCards[safeIndex]) return;
+    // Per card mastery update persisted to lowdb
+    async function handleMastery(delta, btnColor) {
+        const targetCard = currentCards[safeIndex];
+        if (!activeDeck || !targetCard) return;
 
         setAnimatingBtn(btnColor);
         setTimeout(() => setAnimatingBtn(null), 300);
 
-        setDecks((prevDecks) => {
-            const targetDeck = prevDecks[resolvedDeckTitle];
-            if (!targetDeck) return prevDecks;
-
-            const updatedCards = targetDeck.cards.map((card, idx) => {
-                if (idx !== safeIndex) return card;
-                const currentScore =
-                    typeof card.mastery_score === "number" ? card.mastery_score : 0;
-                const newScore = Math.max(-5, Math.min(5, currentScore + delta));
-                return { ...card, mastery_score: newScore };
-            });
-
-            return {
-                ...prevDecks,
-                [resolvedDeckTitle]: {
-                    ...targetDeck,
-                    cards: updatedCards,
-                },
-            };
-        });
+        setDecks((prevDecks) =>
+            prevDecks.map((deck) => {
+                if (deck.id !== activeDeck.id) return deck;
+                return {
+                    ...deck,
+                    cards: deck.cards.map((card) =>
+                        card.id === targetCard.id
+                            ? {
+                                ...card,
+                                mastery_score: Math.max(
+                                    -5,
+                                    Math.min(5, (card.mastery_score || 0) + delta)
+                                ),
+                            }
+                            : card
+                    ),
+                };
+            })
+        );
 
         setTimeout(() => nextCard(), 200);
+
+        try {
+            const updatedCard = await updateCardMastery(targetCard.id, delta);
+            setDecksError("");
+            setDecks((prevDecks) =>
+                prevDecks.map((deck) => {
+                    if (deck.id !== activeDeck.id) return deck;
+                    return {
+                        ...deck,
+                        cards: deck.cards.map((card) =>
+                            card.id === updatedCard.id ? updatedCard : card
+                        ),
+                    };
+                })
+            );
+        } catch (err) {
+            setDecksError(`Could not save mastery score: ${err.message}`);
+        }
     }
 
-    function selectDeck(title) {
-        setActiveDeckTitle(title);
-        setCurrentIndex(0);
+    function selectDeck(deckId) {
+        setActiveDeckId(deckId);
         setIsFlipped(false);
     }
 
-    function handleDeleteDeck(titleToDelete) {
-        setDecks((prevDecks) => {
-            if (!prevDecks[titleToDelete]) return prevDecks;
-            const updated = { ...prevDecks };
-            delete updated[titleToDelete];
+    async function handleDeleteDeck(deckIdToDelete) {
+        const target = decks.find((d) => d.id === deckIdToDelete);
+        if (!target) return;
 
-            if (resolvedDeckTitle === titleToDelete) {
-                const remaining = Object.keys(updated);
-                setActiveDeckTitle(remaining[0] || "");
-                setCurrentIndex(0);
-                setIsFlipped(false);
-            }
-            return updated;
-        });
-        setStatusMsg(`Deleted deck "${titleToDelete}".`);
-    }
-    function handleRestoreStarterDecks() {
-        const starterTitles = Object.keys(INITIAL_DECKS);
-        const missingTitles = starterTitles.filter((title) => !decks[title]);
+        try {
+            await deleteDeck(deckIdToDelete);
+            setDecksError("");
+            setRestoreMsg("");
 
-        if (missingTitles.length > 0) {
-            // Case 1: At least one starter deck was trashed -> restore ONLY missing ones, preserve existing mastery
-            // scores
-            setDecks((prevDecks) => {
-                const updated = { ...prevDecks };
-                for (const title of missingTitles) {
-                    updated[title] = INITIAL_DECKS[title];
-                }
-                return updated;
+            setDeckIndices((prev) => {
+                const copy = { ...prev };
+                delete copy[deckIdToDelete];
+                return copy;
             });
-            if (!resolvedDeckTitle) {
-                setActiveDeckTitle(missingTitles[0]);
-                setCurrentIndex(0);
-                setIsFlipped(false);
-            }
-            setStatusMsg(`Restored missing starter deck(s): ${missingTitles.join(", ")}.`);
-        } else {
-            // Case 2: All 4 starter decks are already present -> reset their card mastery scores to 0
+
             setDecks((prevDecks) => {
-                const updated = { ...prevDecks };
-                for (const title of starterTitles) {
-                    updated[title] = {
-                        ...updated[title],
-                        cards: updated[title].cards.map((card) => ({
-                            ...card,
-                            mastery_score: 0,
-                        })),
-                    };
+                const remaining = prevDecks.filter((d) => d.id !== deckIdToDelete);
+                if (resolvedDeckId === deckIdToDelete) {
+                    setActiveDeckId(remaining[0]?.id || "");
+                    setIsFlipped(false);
                 }
-                return updated;
+                return remaining;
             });
-            setStatusMsg("Reset card mastery scores to 0 for all 4 starter decks.");
+            setStatusMsg(`Deleted deck "${target.title}".`);
+        } catch (err) {
+            setDecksError(`Could not delete deck: ${err.message}`);
         }
     }
+
+    async function handleRestoreStarterDecks() {
+        setIsRestoring(true);
+        setRestoreMsg("");
+        setDecksError("");
+
+        try {
+            const data = await restoreStarterDecks();
+            const updatedDecks = Array.isArray(data?.decks) ? data.decks : [];
+            setDecks(updatedDecks);
+
+            if (
+                updatedDecks.length > 0 &&
+                !updatedDecks.some((d) => d.id === resolvedDeckId)
+            ) {
+                setActiveDeckId(updatedDecks[0].id);
+                setIsFlipped(false);
+            }
+
+            const msg =
+                data?.message ||
+                "Starter decks restored and starter card mastery scores reset to 0.";
+            setRestoreMsg(msg);
+        } catch (err) {
+            setDecksError(`Could not restore starter decks: ${err.message}`);
+        } finally {
+            setIsRestoring(false);
+        }
+    }
+
     // Keyboard shortcuts: Space = flip, 1 = correct (+1), 2 = wrong (-1), Arrows = nav
     useEffect(() => {
         function handleKeyDown(e) {
@@ -260,7 +322,7 @@ export default function App() {
 
         window.addEventListener("keydown", handleKeyDown);
         return () => window.removeEventListener("keydown", handleKeyDown);
-    }, [safeIndex, resolvedDeckTitle, decks, isFlipped]);
+    }, [safeIndex, resolvedDeckId, decks, isFlipped]);
 
     function toggleTimer() {
         setTimerState((prev) => ({ ...prev, isRunning: !prev.isRunning }));
@@ -276,6 +338,11 @@ export default function App() {
 
     async function handleGenerateFlashcards(e) {
         e.preventDefault();
+        if (!notesInput.trim()) {
+            setStatusMsg("Please enter a topic or study notes first.");
+            return;
+        }
+
         setIsGenerating(true);
         setStatusMsg("Sending notes to API Gateway...");
 
@@ -288,25 +355,19 @@ export default function App() {
                 return;
             }
 
-            const newDeckName = `Generated: ${notesInput.trim().substring(0, 15)}`;
-            setDecks((prev) => ({
-                ...prev,
-                [newDeckName]: { cards: generatedCards },
-            }));
-            setActiveDeckTitle(newDeckName);
-            setCurrentIndex(0);
+            const newDeckTitle = `Generated: ${notesInput.trim().substring(0, 15)}`;
+            const savedDeck = await createDeck(newDeckTitle, generatedCards);
+
+            setDecks((prev) => [...prev, savedDeck]);
+            setActiveDeckId(savedDeck.id);
             setIsFlipped(false);
             setNotesInput("");
             setStatusMsg(
-                `Success! Generated ${generatedCards.length} flashcards in "${newDeckName}".`
+                `Success! Saved ${savedDeck.cards.length} flashcards in "${savedDeck.title}".`
             );
         } catch (err) {
             console.error(err);
-            if (err instanceof TypeError) {
-                setStatusMsg("Network error: Could not reach API Gateway on port 3000.");
-            } else {
-                setStatusMsg(`Error: ${err.message}`);
-            }
+            setStatusMsg(`Error: ${err.message}`);
         } finally {
             setIsGenerating(false);
         }
@@ -355,7 +416,11 @@ export default function App() {
 
                             <DeckList
                                 decks={decks}
-                                activeDeckTitle={resolvedDeckTitle}
+                                activeDeckId={resolvedDeckId}
+                                isLoadingDecks={isLoadingDecks}
+                                decksError={decksError}
+                                isRestoring={isRestoring}
+                                restoreMsg={restoreMsg}
                                 onSelectDeck={selectDeck}
                                 onDeleteDeck={handleDeleteDeck}
                                 onRestoreStarterDecks={handleRestoreStarterDecks}
