@@ -1,15 +1,22 @@
 import dotenv from "dotenv";
-
-import pool from "../lib/db.js";
-dotenv.config({ path: "../.env" });
 import express from "express";
+dotenv.config();
+dotenv.config({ path: "../.env" });
 
 const app = express();
 const PORT = process.env.PORT || 3001;
 const SERVICE_API_KEY = process.env.SERVICE_API_KEY || "tcss460-secret";
-
+const DECKS_URL = process.env.DECKS_URL || "http://localhost:3002";
 app.use(express.json());
-
+// Public health check for gateway monitoring
+app.get("/health", (req, res) => {
+    res.json({
+        status: "ok",
+        service: "groq-service",
+        port: Number(PORT),
+        mode: process.env.AI_MODE || "live",
+    });
+});
 function requireApiKey(req, res, next) {
     if (req.header("x-api-key") !== SERVICE_API_KEY) {
         return res
@@ -24,12 +31,29 @@ app.post("/generate-flashcards", requireApiKey, async (req, res) => {
 
     // Validate input
     if (!notes || typeof notes !== "string" || !notes.trim()) {
-        return res.status(400).json({ message: "Invalid Input" });
+        return res.status(400).json({ error: "Notes input is required." });
     }
-
+    // Mock mode support for offline testing/grading w/o a Groq key
+    if (process.env.AI_MODE === "mock") {
+        return res.status(200).json({
+            cards: [
+                {
+                    question: "[Mock] What does an API Gateway return when a microservice is stopped?",
+                    answer: "502 Bad Gateway.",
+                },
+                {
+                    question: "[Mock] Why must microservices avoid sharing a database?",
+                    answer: "Each service owns its own data so services stay loosely coupled and communicate only through APIs.",
+                },
+            ],
+            toolsUsed: [],
+            aiGenerated: true,
+            mock: true,
+        });
+    }
     if (!process.env.GROQ_API_KEY) {
-        return res.status(500).json({
-            message: "Missing GROQ_API_KEY environment variable."
+        return res.status(503).json({
+            error: "AI service is not configured (missing GROQ_API_KEY).",
         });
     }
 
@@ -89,14 +113,19 @@ app.post("/generate-flashcards", requireApiKey, async (req, res) => {
 
         const groqData = await groqResponse.json();
 
-        // Handle Groq API errors
+        // Handle Groq API errors (429 rate limit, 503 for other upstream Groq failures)
         if (!groqResponse.ok) {
             console.error(groqData);
 
-            return res.status(502).json({
-                error: "Groq API request failed.",
+            if (groqResponse.status === 429) {
+                return res.status(429).json({
+                    error: "Groq API rate limit exceeded. Please try again shortly.",
+                });
+            }
+
+            return res.status(503).json({
+                error: "Groq AI service is temporarily unavailable.",
                 groqStatus: groqResponse.status,
-                details: groqData
             });
         }
 
@@ -118,18 +147,45 @@ app.post("/generate-flashcards", requireApiKey, async (req, res) => {
 
 app.post("/low-mastery/:deckID", requireApiKey, async (req, res) => {
     const { deckID } = req.params;
-
     if (!deckID) {
-        return res.status(401).json({ message: "Invalid Request" });
+        return res.status(400).json({ error: "deckID parameter is required." });
     }
+
     try {
-        const [lowMasteryCards] = await pool.execute(
-            `SELECT f.* FROM flashcards f 
-                JOIN decks d ON f.deck_id = d.deck_id 
-                WHERE d.deck_id = ? 
-                AND f.mastery_score <  -2`,
-            [deckID]
+        // Call decks-service over HTTP with x-api-key instead of reading its DB directly
+        const cardsResp = await fetch(
+            `${DECKS_URL}/cards/low-mastery?deckId=${encodeURIComponent(deckID)}&threshold=0`,
+            { headers: { "x-api-key": SERVICE_API_KEY } }
         );
+
+        if (!cardsResp.ok) {
+            return res.status(502).json({
+                error: "Could not retrieve low-mastery cards from decks-service.",
+            });
+        }
+
+        const { cards: lowMasteryCards = [] } = await cardsResp.json();
+
+        if (process.env.AI_MODE === "mock") {
+            return res.status(200).json({
+                cards: lowMasteryCards.slice(0, 3).map((card) => ({
+                    question: `[Mock Review] Explain the key concept behind: ${card.question}`,
+                    answer: card.answer,
+                })),
+                toolsUsed: [
+                    { tool: "getLowMasteryCards", args: { deckId: deckID, threshold: 0 } },
+                ],
+                aiGenerated: true,
+                mock: true,
+            });
+        }
+        if (!process.env.GROQ_API_KEY) {
+            return res.status(503).json({
+                error: "AI service is not configured (missing GROQ_API_KEY).",
+            });
+        }
+
+        // Existing Groq call continues below using lowMasteryCards
         const prompt = `
                     You are helping a student study by creating flashcards.
 
@@ -183,14 +239,19 @@ app.post("/low-mastery/:deckID", requireApiKey, async (req, res) => {
 
         const groqData = await groqResponse.json();
 
-        // Handle Groq API errors
+        // Handle Groq API errors (429 rate limit, 503 for other upstream Groq failures)
         if (!groqResponse.ok) {
             console.error(groqData);
 
-            return res.status(502).json({
-                error: "Groq API request failed.",
+            if (groqResponse.status === 429) {
+                return res.status(429).json({
+                    error: "Groq API rate limit exceeded. Please try again shortly.",
+                });
+            }
+
+            return res.status(503).json({
+                error: "Groq AI service is temporarily unavailable.",
                 groqStatus: groqResponse.status,
-                details: groqData
             });
         }
 
