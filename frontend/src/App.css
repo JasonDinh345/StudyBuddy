@@ -85,6 +85,8 @@ body {
 }
 
 .nav-item {
+  display: block;
+  text-decoration: none;
   background: transparent;
   border: none;
   color: #e2e8f0;

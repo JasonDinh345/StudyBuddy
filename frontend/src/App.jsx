@@ -13,11 +13,8 @@ import GenerateForm from "./components/GenerateForm";
 import PomodoroTimer from "./components/PomodoroTimer";
 import FlashcardViewer from "./components/FlashcardViewer";
 import DeckList from "./components/DeckList";
-
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 export default function App() {
-    const [activeTab, setActiveTab] = useState(
-        () => localStorage.getItem("studybuddy_tab") || "dashboard"
-    );
 
     const [isSidebarOpen, setIsSidebarOpen] = useState(() => {
         const saved = localStorage.getItem("studybuddy_sidebar_open");
@@ -93,11 +90,6 @@ export default function App() {
             cancelled = true;
         };
     }, []);
-
-    // Persist UI preferences, per-deck slide indices, and timer state locally
-    useEffect(() => {
-        localStorage.setItem("studybuddy_tab", activeTab);
-    }, [activeTab]);
 
     useEffect(() => {
         localStorage.setItem("studybuddy_sidebar_open", JSON.stringify(isSidebarOpen));
@@ -299,6 +291,7 @@ export default function App() {
     // Keyboard shortcuts: Space = flip, 1 = correct (+1), 2 = wrong (-1), Arrows = nav
     useEffect(() => {
         function handleKeyDown(e) {
+            if (window.location.pathname === "/timer") return;
             if (["INPUT", "TEXTAREA"].includes(document.activeElement?.tagName)) return;
             if (currentCards.length === 0) return;
 
@@ -374,85 +367,98 @@ export default function App() {
     }
 
     return (
-        <div className="app-layout">
-            <Sidebar
-                isOpen={isSidebarOpen}
-                onToggle={() => setIsSidebarOpen((prev) => !prev)}
-                activeTab={activeTab}
-                onSelectTab={setActiveTab}
-            />
+        <BrowserRouter>
+            <div className="app-layout">
+                <Sidebar
+                    isOpen={isSidebarOpen}
+                    onToggle={() => setIsSidebarOpen((prev) => !prev)}
+                />
 
-            <main className="main-content">
-                {activeTab === "dashboard" && (
-                    <div className="dashboard-grid">
-                        <div className="top-row">
-                            <GenerateForm
-                                notesInput={notesInput}
-                                onNotesChange={setNotesInput}
-                                onSubmit={handleGenerateFlashcards}
-                                isGenerating={isGenerating}
-                                statusMsg={statusMsg}
-                            />
+                <main className="main-content">
+                    <Routes>
+                        <Route
+                            path="/"
+                            element={
+                                <div className="dashboard-grid">
+                                    <div className="top-row">
+                                        <GenerateForm
+                                            notesInput={notesInput}
+                                            onNotesChange={setNotesInput}
+                                            onSubmit={handleGenerateFlashcards}
+                                            isGenerating={isGenerating}
+                                            statusMsg={statusMsg}
+                                        />
 
-                            <PomodoroTimer
-                                timerState={timerState}
-                                onToggle={toggleTimer}
-                                onReset={resetTimer}
-                            />
-                        </div>
+                                        <PomodoroTimer
+                                            timerState={timerState}
+                                            onToggle={toggleTimer}
+                                            onReset={resetTimer}
+                                        />
+                                    </div>
 
-                        <div className="bottom-row">
-                            <FlashcardViewer
-                                activeDeckTitle={resolvedDeckTitle}
-                                currentCards={currentCards}
-                                currentIndex={safeIndex}
-                                isFlipped={isFlipped}
-                                animatingBtn={animatingBtn}
-                                onFlip={flipCard}
-                                onPrev={prevCard}
-                                onNext={nextCard}
-                                onMastery={handleMastery}
-                            />
+                                    <div className="bottom-row">
+                                        <FlashcardViewer
+                                            activeDeckTitle={resolvedDeckTitle}
+                                            currentCards={currentCards}
+                                            currentIndex={safeIndex}
+                                            isFlipped={isFlipped}
+                                            animatingBtn={animatingBtn}
+                                            onFlip={flipCard}
+                                            onPrev={prevCard}
+                                            onNext={nextCard}
+                                            onMastery={handleMastery}
+                                        />
 
-                            <DeckList
-                                decks={decks}
-                                activeDeckId={resolvedDeckId}
-                                isLoadingDecks={isLoadingDecks}
-                                decksError={decksError}
-                                isRestoring={isRestoring}
-                                restoreMsg={restoreMsg}
-                                onSelectDeck={selectDeck}
-                                onDeleteDeck={handleDeleteDeck}
-                                onRestoreStarterDecks={handleRestoreStarterDecks}
-                            />
-                        </div>
-                    </div>
-                )}
+                                        <DeckList
+                                            decks={decks}
+                                            activeDeckId={resolvedDeckId}
+                                            isLoadingDecks={isLoadingDecks}
+                                            decksError={decksError}
+                                            isRestoring={isRestoring}
+                                            restoreMsg={restoreMsg}
+                                            onSelectDeck={selectDeck}
+                                            onDeleteDeck={handleDeleteDeck}
+                                            onRestoreStarterDecks={handleRestoreStarterDecks}
+                                        />
+                                    </div>
+                                </div>
+                            }
+                        />
 
-                {activeTab === "flashcards" && (
-                    <FlashcardViewer
-                        activeDeckTitle={resolvedDeckTitle}
-                        currentCards={currentCards}
-                        currentIndex={safeIndex}
-                        isFlipped={isFlipped}
-                        animatingBtn={animatingBtn}
-                        onFlip={flipCard}
-                        onPrev={prevCard}
-                        onNext={nextCard}
-                        onMastery={handleMastery}
-                        isFullscreen
-                    />
-                )}
+                        <Route
+                            path="/flashcards"
+                            element={
+                                <FlashcardViewer
+                                    activeDeckTitle={resolvedDeckTitle}
+                                    currentCards={currentCards}
+                                    currentIndex={safeIndex}
+                                    isFlipped={isFlipped}
+                                    animatingBtn={animatingBtn}
+                                    onFlip={flipCard}
+                                    onPrev={prevCard}
+                                    onNext={nextCard}
+                                    onMastery={handleMastery}
+                                    isFullscreen
+                                />
+                            }
+                        />
 
-                {activeTab === "timer" && (
-                    <PomodoroTimer
-                        timerState={timerState}
-                        onToggle={toggleTimer}
-                        onReset={resetTimer}
-                        isFullscreen
-                    />
-                )}
-            </main>
-        </div>
+                        <Route
+                            path="/timer"
+                            element={
+                                <PomodoroTimer
+                                    timerState={timerState}
+                                    onToggle={toggleTimer}
+                                    onReset={resetTimer}
+                                    isFullscreen
+                                />
+                            }
+                        />
+
+                        <Route path="*" element={<Navigate to="/" replace />} />
+                    </Routes>
+                </main>
+            </div>
+        </BrowserRouter>
     );
 }

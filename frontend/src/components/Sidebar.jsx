@@ -1,11 +1,9 @@
+import { NavLink } from "react-router-dom";
 import logoImg from "../assets/logo.png";
 
-export default function Sidebar({
-                                    isOpen,
-                                    onToggle,
-                                    activeTab,
-                                    onSelectTab,
-                                }) {
+export default function Sidebar({ isOpen, onToggle }) {
+    const getNavClass = ({ isActive }) => `nav-item ${isActive ? "active" : ""}`;
+
     return (
         <>
             <button
@@ -22,25 +20,16 @@ export default function Sidebar({
                     <img src={logoImg} alt="StudyBuddy Logo" className="brand-logo-img" />
                 </div>
 
-                <nav className="sidebar-nav">
-                    <button
-                        className={`nav-item ${activeTab === "dashboard" ? "active" : ""}`}
-                        onClick={() => onSelectTab("dashboard")}
-                    >
+                <nav className="sidebar-nav" aria-label="Primary navigation">
+                    <NavLink to="/" end className={getNavClass}>
                         Dashboard
-                    </button>
-                    <button
-                        className={`nav-item ${activeTab === "flashcards" ? "active" : ""}`}
-                        onClick={() => onSelectTab("flashcards")}
-                    >
+                    </NavLink>
+                    <NavLink to="/flashcards" className={getNavClass}>
                         Flashcards
-                    </button>
-                    <button
-                        className={`nav-item ${activeTab === "timer" ? "active" : ""}`}
-                        onClick={() => onSelectTab("timer")}
-                    >
+                    </NavLink>
+                    <NavLink to="/timer" className={getNavClass}>
                         Timer
-                    </button>
+                    </NavLink>
                 </nav>
 
                 <div className="sidebar-footer">
