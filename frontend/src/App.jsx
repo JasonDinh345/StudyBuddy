@@ -7,6 +7,8 @@ import {
     updateCardMastery,
     restoreStarterDecks,
     generateFlashcardsFromNotes,
+    addCardToDeck,
+    generateRemedialCards,
 } from "./services/api";
 import Sidebar from "./components/Sidebar";
 import GenerateForm from "./components/GenerateForm";
@@ -46,7 +48,12 @@ export default function App() {
     const [statusMsg, setStatusMsg] = useState("");
     const [isGenerating, setIsGenerating] = useState(false);
     const [animatingBtn, setAnimatingBtn] = useState(null);
-
+    const [remedialLoading, setRemedialLoading] = useState(false);
+    const [remedialError, setRemedialError] = useState("");
+    const [remedialResult, setRemedialResult] = useState(null);
+    const [remedialSaveMsg, setRemedialSaveMsg] = useState("");
+    const [isSavingRemedial, setIsSavingRemedial] = useState(false);
+    const [struggleNudge, setStruggleNudge] = useState(null);
     const [timerState, setTimerState] = useState(() => {
         try {
             const savedTimer = localStorage.getItem("studybuddy_timer_v8");
@@ -138,7 +145,11 @@ export default function App() {
         const timer = setTimeout(() => setRestoreMsg(""), 10000);
         return () => clearTimeout(timer);
     }, [restoreMsg]);
-
+    useEffect(() => {
+        if (!remedialSaveMsg) return;
+        const timer = setTimeout(() => setRemedialSaveMsg(""), 10000);
+        return () => clearTimeout(timer);
+    }, [remedialSaveMsg]);
     const activeDeck = decks.find((d) => d.id === activeDeckId) || decks[0] || null;
     const resolvedDeckId = activeDeck ? activeDeck.id : "";
     const resolvedDeckTitle = activeDeck ? activeDeck.title : "";
@@ -183,7 +194,19 @@ export default function App() {
 
         setAnimatingBtn(btnColor);
         setTimeout(() => setAnimatingBtn(null), 300);
+        const currentScore =
+            typeof targetCard.mastery_score === "number"
+                ? targetCard.mastery_score
+                : 0;
+        const nextScore = Math.max(-5, Math.min(5, currentScore + delta));
 
+        if (delta < 0 && nextScore <= -2) {
+            setStruggleNudge({
+                deckId: activeDeck.id,
+                cardId: targetCard.id,
+                masteryScore: nextScore,
+            });
+        }
         setDecks((prevDecks) =>
             prevDecks.map((deck) => {
                 if (deck.id !== activeDeck.id) return deck;
@@ -228,6 +251,9 @@ export default function App() {
     function selectDeck(deckId) {
         setActiveDeckId(deckId);
         setIsFlipped(false);
+        setRemedialResult(null);
+        setRemedialError("");
+        setStruggleNudge(null);
     }
 
     async function handleDeleteDeck(deckIdToDelete) {
@@ -365,7 +391,105 @@ export default function App() {
             setIsGenerating(false);
         }
     }
+    async function handleGenerateRemedial() {
+        if (!resolvedDeckId) return;
+        setRemedialLoading(true);
+        setRemedialError("");
+        setRemedialSaveMsg("");
+        setStruggleNudge(null);
 
+        try {
+            const result = await generateRemedialCards(resolvedDeckId);
+            setRemedialResult(result);
+        } catch (err) {
+            setRemedialError(
+                `${err.message} (Other features like studying and the timer still work.)`
+            );
+        } finally {
+            setRemedialLoading(false);
+        }
+    }
+
+    async function handleAddRemedialToCurrentDeck() {
+        if (!remedialResult || !remedialResult.cards?.length) return;
+        setIsSavingRemedial(true);
+        setRemedialError("");
+
+        try {
+            const createdCards = [];
+            for (const card of remedialResult.cards) {
+                const saved = await addCardToDeck(remedialResult.deckId, card);
+                createdCards.push(saved);
+            }
+
+            setDecks((prevDecks) =>
+                prevDecks.map((deck) =>
+                    deck.id === remedialResult.deckId
+                        ? { ...deck, cards: [...deck.cards, ...createdCards] }
+                        : deck
+                )
+            );
+            setRemedialSaveMsg(
+                `Added ${createdCards.length} remedial cards to "${remedialResult.deckTitle}".`
+            );
+            setRemedialResult(null);
+        } catch (err) {
+            setRemedialError(`Could not add cards to deck: ${err.message}`);
+        } finally {
+            setIsSavingRemedial(false);
+        }
+    }
+
+    async function handleSaveRemedialAsNewDeck() {
+        if (!remedialResult || !remedialResult.cards?.length) return;
+        setIsSavingRemedial(true);
+        setRemedialError("");
+
+        try {
+            const title = `Remedial: ${remedialResult.deckTitle || resolvedDeckTitle}`;
+            const savedDeck = await createDeck(title, remedialResult.cards);
+
+            setDecks((prev) => [...prev, savedDeck]);
+            setActiveDeckId(savedDeck.id);
+            setIsFlipped(false);
+            setRemedialSaveMsg(
+                `Saved ${savedDeck.cards.length} remedial cards as "${savedDeck.title}".`
+            );
+            setRemedialResult(null);
+        } catch (err) {
+            setRemedialError(`Could not save remedial deck: ${err.message}`);
+        } finally {
+            setIsSavingRemedial(false);
+        }
+    }
+
+    function handleDiscardRemedial() {
+        setRemedialResult(null);
+        setRemedialError("");
+    }
+    const flashcardViewerProps = {
+        activeDeckTitle: resolvedDeckTitle,
+        currentCards,
+        currentIndex: safeIndex,
+        isFlipped,
+        animatingBtn,
+        onFlip: flipCard,
+        onPrev: prevCard,
+        onNext: nextCard,
+        onMastery: handleMastery,
+        remedialLoading,
+        remedialError,
+        remedialResult,
+        remedialSaveMsg,
+        isSavingRemedial,
+        struggleNudge:
+            struggleNudge?.deckId === resolvedDeckId ? struggleNudge : null,
+        onDismissNudge: () => setStruggleNudge(null),
+        onGenerateRemedial: handleGenerateRemedial,
+        onAddRemedialToCurrentDeck: handleAddRemedialToCurrentDeck,
+        onSaveRemedialAsNewDeck: handleSaveRemedialAsNewDeck,
+        onDiscardRemedial: handleDiscardRemedial,
+    };
     return (
         <BrowserRouter>
             <div className="app-layout">
@@ -397,17 +521,9 @@ export default function App() {
                                     </div>
 
                                     <div className="bottom-row">
-                                        <FlashcardViewer
-                                            activeDeckTitle={resolvedDeckTitle}
-                                            currentCards={currentCards}
-                                            currentIndex={safeIndex}
-                                            isFlipped={isFlipped}
-                                            animatingBtn={animatingBtn}
-                                            onFlip={flipCard}
-                                            onPrev={prevCard}
-                                            onNext={nextCard}
-                                            onMastery={handleMastery}
-                                        />
+                                        <FlashcardViewer {...flashcardViewerProps} />
+
+
 
                                         <DeckList
                                             decks={decks}
@@ -428,20 +544,8 @@ export default function App() {
                         <Route
                             path="/flashcards"
                             element={
-                                <FlashcardViewer
-                                    activeDeckTitle={resolvedDeckTitle}
-                                    currentCards={currentCards}
-                                    currentIndex={safeIndex}
-                                    isFlipped={isFlipped}
-                                    animatingBtn={animatingBtn}
-                                    onFlip={flipCard}
-                                    onPrev={prevCard}
-                                    onNext={nextCard}
-                                    onMastery={handleMastery}
-                                    isFullscreen
-                                />
-                            }
-                        />
+                                <FlashcardViewer {...flashcardViewerProps} isFullscreen/>}/>
+
 
                         <Route
                             path="/timer"

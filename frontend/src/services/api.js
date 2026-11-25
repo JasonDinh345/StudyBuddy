@@ -100,3 +100,19 @@ export async function generateFlashcardsFromNotes(notes) {
     });
     return extractGeneratedCards(data);
 }
+export async function addCardToDeck(deckId, card) {
+    return apiRequest(`/api/decks/${encodeURIComponent(deckId)}/cards`, {
+        method: "POST",
+        body: JSON.stringify({
+            question: card.question,
+            answer: card.answer,
+            mastery_score: 0,
+        }),
+    });
+}
+
+export async function generateRemedialCards(deckId) {
+    return apiRequest(`/api/groq/low-mastery/${encodeURIComponent(deckId)}`, {
+        method: "POST",
+    });
+}
